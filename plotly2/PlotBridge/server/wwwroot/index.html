@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PlotBridge</title>
+<link rel="stylesheet" href="style.css" />
+<script src="plotly.min.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <span class="brand">PlotBridge</span>
+  <span class="board" id="boardName">default</span>
+  <span class="status" id="status"><i class="dot"></i><span id="statusText">connecting…</span></span>
+  <span class="spacer"></span>
+  <label class="follow"><input type="checkbox" id="follow" checked /> follow pushes</label>
+  <button id="themeBtn" class="ghost" title="Light / dark / follow system">theme: auto</button>
+</header>
+
+<nav class="tabs" id="tabs" aria-label="Charts"></nav>
+
+<main class="workspace">
+  <section class="plotpane">
+    <div id="plot"></div>
+    <div id="empty" class="empty" hidden>
+      <h2>No data yet</h2>
+      <p>This page is live — anything pushed to board <code id="emptyBoard">default</code> appears here immediately.</p>
+      <h3>Drop a file</h3>
+      <p>Write a text file into the drop folder; the filename picks the destination
+         (<code>series.tsv</code>, <code>chart__series.tsv</code>, <code>board__chart__series.tsv</code>):</p>
+      <pre id="dropPath">…</pre>
+      <p>From the Visual Studio Immediate Window (managed frame):</p>
+      <pre id="immediateSnippet">…</pre>
+      <h3>Or post to it</h3>
+      <pre id="curlSnippet">…</pre>
+      <p>Or paste values straight into the <strong>Paste data</strong> panel on the right —
+         raw debugger <em>Copy Value</em> output is accepted as-is.</p>
+    </div>
+  </section>
+
+  <aside class="sidebar">
+    <div class="panel">
+      <div class="panel-head">Chart</div>
+      <div class="panel-body" id="chartOpts"></div>
+    </div>
+
+    <div class="panel grow">
+      <div class="panel-head">
+        Series <span class="muted" id="seriesCount"></span>
+      </div>
+      <div class="panel-body" id="seriesList"></div>
+    </div>
+
+    <details class="panel paste">
+      <summary class="panel-head">Paste data</summary>
+      <div class="panel-body">
+        <div class="field">
+          <label for="pasteName">Series name</label>
+          <input id="pasteName" type="text" value="pasted" />
+        </div>
+        <label class="inline"><input type="checkbox" id="pasteReplace" checked /> replace series of the same name</label>
+        <textarea id="pasteText" spellcheck="false"
+          placeholder="x&#9;y&#10;or&#10;[0] {X=1.5 Y=2.25 Z=0}"></textarea>
+        <button id="pasteBtn" class="primary">Plot</button>
+        <p class="hint" id="pasteHint"></p>
+      </div>
+    </details>
+  </aside>
+</main>
+
+<div class="datamodal" id="dataModal" hidden>
+  <div class="datamodal-inner">
+    <div class="datamodal-head">
+      <strong id="dataTitle">Values</strong>
+      <span class="spacer"></span>
+      <button id="dataCopy" class="ghost">Copy all as TSV</button>
+      <button id="dataClose" class="ghost">Close</button>
+    </div>
+    <div class="datamodal-body" id="dataBody"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

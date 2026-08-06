@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  PlotBridge 0.1.0 - natvis registrations
+
+  This file is yours to edit. It is copied to
+      %USERPROFILE%\Documents\Visual Studio 2022\Visualizers\PlotBridge.natvis
+  on first use, and once it exists PlotBridge will not overwrite your changes;
+  an updated copy is written next to it as PlotBridge.natvis.new instead.
+
+  ADDING A TYPE is one three-line <Type> block. Copy the nearest one and change
+  the element type in the Name attribute. Changes are picked up when you start
+  (or restart) a debug session - no extension rebuild needed.
+
+  A <Type> HERE CARRIES NOTHING BUT THE VISUALIZER. natvis.xsd defines the body
+  of <Type> as an xs:choice: either the visualization elements (DisplayString,
+  Expand, StringView, ...) or one or more <UIVisualizer> elements - never both.
+  So these entries cannot, and must not, restate how the type is displayed or
+  expanded. They register the "Plot with PlotBridge" action and nothing else;
+  MSVC's stl.natvis keeps providing std::vector's normal display and its
+  [0]..[n-1] children, which is exactly what PlotBridge reads.
+
+  (That constraint is also why registering a visualizer does not shadow the
+  existing visualization the way a competing DisplayString/Expand entry would.)
+
+  Because stl.natvis owns the expansion, the children include synthetic entries
+  like [size], [capacity] and [Raw View]. DebuggerPoints.cs keeps only names
+  matching ^\[\d+\]$, so those are skipped.
+-->
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+
+  <!-- ServiceId must match PlotBridgeGuids.Service in the extension. The debugger
+       resolves it with QueryService, and that is what loads the package. -->
+  <UIVisualizer ServiceId="{3f7a1c58-9e2b-4d16-8a54-c6b0f39d7e42}" Id="1"
+                MenuName="Plot with PlotBridge" />
+
+  <!-- ==================================================== OpenCASCADE 3D ====
+       gp_Pnt / gp_Vec / gp_Dir / gp_XYZ are all three doubles, so each element
+       yields three numbers and the chart comes out 3D. -->
+
+  <Type Name="std::vector&lt;gp_Pnt,*&gt;">
+    <UIVisualizer ServiceId="{3f7a1c58-9e2b-4d16-8a54-c6b0f39d7e42}" Id="1" />
+  </Type>
+
+  <Type Name="std::vector&lt;gp_Vec,*&gt;">
+    <UIVisualizer ServiceId="{3f7a1c58-9e2b-4d16-8a54-c6b0f39d7e42}" Id="1" />
+  </Type>
+
+  <Type Name="std::vector&lt;gp_Dir,*&gt;">
+    <UIVisualizer ServiceId="{3f7a1c58-9e2b-4d16-8a54-c6b0f39d7e42}" Id="1" />
+  </Type>
+
+  <Type Name="std::vector&lt;gp_XYZ,*&gt;">
+    <UIVisualizer ServiceId="{3f7a1c58-9e2b-4d16-8a54-c6b0f39d7e42}" Id="1" />
+  </Type>
+
+  <!-- ==================================================== OpenCASCADE 2D ====
+       Two doubles per element. -->
+
+  <Type Name="std::vector&lt;gp_Pnt2d,*&gt;">
+    <UIVisualizer ServiceId="{3f7a1c58-9e2b-4d16-8a54-c6b0f39d7e42}" Id="1" />
+  </Type>
+
+  <Type Name="std::vector&lt;gp_Vec2d,*&gt;">
+    <UIVisualizer ServiceId="{3f7a1c58-9e2b-4d16-8a54-c6b0f39d7e42}" Id="1" />
+  </Type>
+
+  <Type Name="std::vector&lt;gp_Dir2d,*&gt;">
+    <UIVisualizer ServiceId="{3f7a1c58-9e2b-4d16-8a54-c6b0f39d7e42}" Id="1" />
+  </Type>
+
+  <Type Name="std::vector&lt;gp_XY,*&gt;">
+    <UIVisualizer ServiceId="{3f7a1c58-9e2b-4d16-8a54-c6b0f39d7e42}" Id="1" />
+  </Type>
+
+  <!-- ========================================================== scalars ====
+       One number per element, so these plot as value against index. Primitive
+       type names are permitted specifically for UIVisualizer entries. -->
+
+  <Type Name="std::vector&lt;double,*&gt;">
+    <UIVisualizer ServiceId="{3f7a1c58-9e2b-4d16-8a54-c6b0f39d7e42}" Id="1" />
+  </Type>
+
+  <Type Name="std::vector&lt;float,*&gt;">
+    <UIVisualizer ServiceId="{3f7a1c58-9e2b-4d16-8a54-c6b0f39d7e42}" Id="1" />
+  </Type>
+
+  <Type Name="std::vector&lt;int,*&gt;">
+    <UIVisualizer ServiceId="{3f7a1c58-9e2b-4d16-8a54-c6b0f39d7e42}" Id="1" />
+  </Type>
+
+  <!-- ============================================== OCCT collections ========
+       Untested: these depend on OCCT's own natvis (or the default expansion)
+       producing [N] children. Uncomment to try; if the glyph appears but no
+       points come back, the expansion is the thing to look at. -->
+
+  <!--
+  <Type Name="NCollection_Array1&lt;gp_Pnt&gt;">
+    <UIVisualizer ServiceId="{3f7a1c58-9e2b-4d16-8a54-c6b0f39d7e42}" Id="1" />
+  </Type>
+
+  <Type Name="NCollection_Vector&lt;gp_Pnt&gt;">
+    <UIVisualizer ServiceId="{3f7a1c58-9e2b-4d16-8a54-c6b0f39d7e42}" Id="1" />
+  </Type>
+  -->
+
+</AutoVisualizer>

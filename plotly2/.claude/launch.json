@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "plotbridge",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "PlotBridge/server/PlotBridge.Server.csproj", "--no-launch-profile"],
+      "port": 8777,
+      "url": "http://localhost:8777"
+    }
+  ]
+}

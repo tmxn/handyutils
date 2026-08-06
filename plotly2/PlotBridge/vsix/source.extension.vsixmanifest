@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
+  <Metadata>
+    <Identity Id="PlotBridge.Vsix.6f1b4c7e-6a8d-4a2e-9c3f-1d5b8e7a4c21" Version="0.1.0" Language="en-US" Publisher="PlotBridge" />
+    <DisplayName>PlotBridge</DisplayName>
+    <Description xml:space="preserve">Plot point collections straight from the debugger to a live Plotly page. Adds a "Plot with PlotBridge" visualizer to std::vector&lt;gp_Pnt&gt; and friends in Locals, Autos, Watch and DataTips.</Description>
+    <Tags>debugger, visualizer, plot, plotly, opencascade, natvis</Tags>
+  </Metadata>
+  <Installation>
+    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.0,18.0)">
+      <ProductArchitecture>amd64</ProductArchitecture>
+    </InstallationTarget>
+  </Installation>
+  <Dependencies>
+    <Dependency Id="Microsoft.Framework.NDP" DisplayName="Microsoft .NET Framework" d:Source="Manual" Version="[4.7.2,)" />
+  </Dependencies>
+  <Prerequisites>
+    <Prerequisite Id="Microsoft.VisualStudio.Component.CoreEditor" Version="[17.0,18.0)" DisplayName="Visual Studio core editor" />
+  </Prerequisites>
+  <Assets>
+    <Asset Type="Microsoft.VisualStudio.VsPackage" d:Source="Project" d:ProjectName="%CurrentProject%" Path="|%CurrentProject%;PkgdefProjectOutputGroup|" />
+  </Assets>
+</PackageManifest>
