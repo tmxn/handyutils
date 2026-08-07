@@ -18,8 +18,8 @@ namespace PlotBridge.Vsix
     /// Which children to read, in order of preference:
     ///
     /// 1. A CHART VIEW child - a synthetic node named [chart3d] or [chart2d] whose
-    ///    own children render one point per line. FCCore.natvis builds these with
-    ///    IndexListItems over a view(rawxyz) / view(rawxy) DisplayString, giving
+    ///    own children render one point per line. Built with IndexListItems over a
+    ///    view(rawxyz) / view(rawxy) DisplayString, giving
     ///    tab-separated numbers. Preferred because it is one extra enumeration and
     ///    the values need no interpretation. The 3d node is tried first: when the
     ///    element type has no z, an Optional 3d entry drops out on its own, so the

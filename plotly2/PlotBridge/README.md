@@ -100,11 +100,11 @@ that makes the engine build a property object per child — the flat path never
 pays for it.
 
 A **chart view** is just a synthetic node whose children render one point per
-line. `FCCore.natvis` builds them with `IndexListItems` over a `view(rawxyz)` /
-`view(rawxy)` `DisplayString`, giving tab-separated numbers. The 3D node is
-preferred; when the element type has no `z` an `Optional` 3D entry drops out by
-itself, so the choice settles dimensionality too. Worth adding for any container
-you plot often — it turns the slow route into the fastest one.
+line. It is built with `IndexListItems` over a `view(rawxyz)` / `view(rawxy)`
+`DisplayString`, giving tab-separated numbers. The 3D node is preferred; when
+the element type has no `z` an `Optional` 3D entry drops out by itself, so the
+choice settles dimensionality too. Worth adding for any container you plot
+often — it turns the slow route into the fastest one.
 
 `Test-Contract.ps1` pins down every value-string format above.
 
@@ -138,8 +138,6 @@ has a `<Type>` entry for the same type, its entry wins the type match.
 To tell whether that's the problem, compare a type your project's natvis covers
 against one it doesn't — `std::vector<double>` is usually uncontested. Glyph on
 one but not the other means precedence; glyph on neither means something else.
-`vsix/FCCore-natvis-snippet.xml` has blocks to paste into a project natvis for
-the contested types.
 
 For ground truth, turn on **Tools → Options → Debugging → Output Window →
 Natvis diagnostic messages → Verbose**. The Debug output pane then names every
