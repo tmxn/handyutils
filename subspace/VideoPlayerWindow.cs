@@ -13,7 +13,6 @@ public class VideoPlayerWindow : Form
     private readonly Button _playPauseBtn;
     private readonly SeekBar _seekBar;
     private readonly Label _timeLabel;
-    private readonly Button _closeBtn;
     private readonly System.Windows.Forms.Timer _timer;
     private readonly Stream _stream;
     private bool _ended;
@@ -38,22 +37,18 @@ public class VideoPlayerWindow : Form
 
         var bottom = new Panel { Dock = DockStyle.Bottom, Height = 46, BackColor = Color.FromArgb(30, 30, 30) };
         _playPauseBtn = new Button { Text = "Pause", Size = new Size(70, 30), Location = new Point(10, 8), BackColor = Color.FromArgb(70, 70, 70), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
-        _seekBar = new SeekBar { Location = new Point(92, 15), Width = 650, Height = 16 };
-        _timeLabel = new Label { Size = new Size(180, 22), Location = new Point(750, 12), ForeColor = Color.LightGray, Text = "00:00:00 / 00:00:00", AutoSize = false };
-        _closeBtn = new Button { Text = "✕", Size = new Size(36, 30), Location = new Point(914, 8), BackColor = Color.FromArgb(180, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        _seekBar = new SeekBar { Location = new Point(92, 15), Width = 700, Height = 16 };
+        _timeLabel = new Label { Size = new Size(180, 22), Location = new Point(800, 12), ForeColor = Color.LightGray, Text = "00:00:00 / 00:00:00", AutoSize = false };
 
         bottom.Controls.Add(_playPauseBtn);
         bottom.Controls.Add(_seekBar);
         bottom.Controls.Add(_timeLabel);
-        bottom.Controls.Add(_closeBtn);
 
         Controls.Add(_videoView);
         Controls.Add(bottom);
 
         _playPauseBtn.Click += (_, _) => TogglePause();
-        _closeBtn.Click += (_, _) => Close();
         _seekBar.SeekRequested += (_, frac) => SeekTo(frac);
-        _videoView.MouseWheel += VideoView_MouseWheel;
 
         _mp.EndReached += (_, _) => this.TryInvoke(() =>
         {
@@ -106,11 +101,6 @@ public class VideoPlayerWindow : Form
         thread.Start();
     }
 
-    private void VideoView_MouseWheel(object? sender, MouseEventArgs e)
-    {
-        _mp.Volume = Math.Clamp(_mp.Volume + (e.Delta > 0 ? 5 : -5), 0, 100);
-    }
-
     private void TogglePause()
     {
         // If the media reached the end, restart from the beginning.
@@ -159,6 +149,12 @@ public class VideoPlayerWindow : Form
     {
         var t = TimeSpan.FromMilliseconds(ms);
         return t.TotalHours >= 1 ? t.ToString(@"hh\:mm\:ss") : t.ToString(@"mm\:ss");
+    }
+
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        _mp.Volume = Math.Clamp(_mp.Volume + (e.Delta > 0 ? 5 : -5), 0, 100);
+        base.OnMouseWheel(e);
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
