@@ -18,6 +18,10 @@ public class VideoPlayerWindow : Form
     private readonly Stream _stream;
     private bool _ended;
     private bool _closing;
+    private static IntPtr _hookId = IntPtr.Zero;
+    private static readonly object _hookLock = new();
+    private static readonly HashSet<VideoPlayerWindow> _openWindows = new();
+    private static HookProc? _hookProc; // keep alive so GC doesn't collect it
 
     private VideoPlayerWindow(LibVLC libVlc, MediaPlayer mp, Media media, StreamMediaInput input, Stream stream, string title)
     {
@@ -35,6 +39,7 @@ public class VideoPlayerWindow : Form
 
         _videoView = new VideoView { Dock = DockStyle.Fill, BackColor = Color.Black };
         _videoView.MediaPlayer = _mp;
+        _mp.EnableMouseInput = false;
 
         var bottom = new Panel { Dock = DockStyle.Bottom, Height = 46, BackColor = Color.FromArgb(30, 30, 30) };
         _playPauseBtn = new Button
@@ -110,6 +115,33 @@ public class VideoPlayerWindow : Form
         // Play only once the control handles exist so VLC renders into the VideoView
         // instead of spawning its own detached native window.
         Shown += (_, _) => _mp.Play();
+
+        // Low-level mouse hook to intercept wheel over the video area.
+        // libvlc's native child window bypasses WinForms message loops entirely.
+        HandleCreated += (_, _) =>
+        {
+            lock (_hookLock)
+            {
+                _openWindows.Add(this);
+                if (_hookId == IntPtr.Zero)
+                {
+                    _hookProc = MouseHookProc;
+                    _hookId = SetWindowsHookEx(WH_MOUSE_LL, _hookProc, IntPtr.Zero, 0);
+                }
+            }
+        };
+        FormClosed += (_, _) =>
+        {
+            lock (_hookLock)
+            {
+                _openWindows.Remove(this);
+                if (_openWindows.Count == 0 && _hookId != IntPtr.Zero)
+                {
+                    UnhookWindowsHookEx(_hookId);
+                    _hookId = IntPtr.Zero;
+                }
+            }
+        };
     }
 
     public static void Run(string title, Stream stream)
@@ -117,7 +149,7 @@ public class VideoPlayerWindow : Form
         var thread = new Thread(() =>
         {
             Core.Initialize();
-            var libVlc = new LibVLC();
+            var libVlc = new LibVLC("--hotkeys-y-wheel-mode=-1", "--hotkeys-x-wheel-mode=-1");
             libVlc.Log += (_, _) => { };   // swallow VLC log output so it never hits the console
             var mp = new MediaPlayer(libVlc);
             Media? media = null;
@@ -198,11 +230,67 @@ public class VideoPlayerWindow : Form
         return t.TotalHours >= 1 ? t.ToString(@"hh\:mm\:ss") : t.ToString(@"mm\:ss");
     }
 
-    protected override void OnMouseWheel(MouseEventArgs e)
+    // Low-level mouse hook — intercepts wheel events before libvlc's native window sees them.
+    private const int WH_MOUSE_LL = 14;
+    private const int WM_MOUSEWHEEL = 0x020A;
+
+    private delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetWindowsHookEx(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern Point GetCursorPos(out Point lpPoint);
+
+    private static IntPtr MouseHookProc(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        _mp.Volume = Math.Clamp(_mp.Volume + (e.Delta > 0 ? 5 : -5), 0, 100);
-        _volumeGauge.Volume = _mp.Volume; // immediate visual feedback
-        base.OnMouseWheel(e);
+        if (nCode >= 0 && wParam == (IntPtr)WM_MOUSEWHEEL)
+        {
+            GetCursorPos(out Point cursorPos);
+
+            // Find which VideoPlayerWindow (if any) the cursor is over
+            VideoPlayerWindow? target = null;
+            lock (_openWindows)
+            {
+                foreach (var win in _openWindows)
+                {
+                    if (win._videoView.IsHandleCreated && !win._videoView.IsDisposed)
+                    {
+                        var rect = win._videoView.RectangleToScreen(win._videoView.ClientRectangle);
+                        if (rect.Contains(cursorPos)) { target = win; break; }
+                    }
+                }
+            }
+
+            if (target != null)
+            {
+                var data = System.Runtime.InteropServices.Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
+                int delta = (short)(data.mouseData >> 16); // signed 16-bit: 120 = up, -120 = down
+                int step = (delta > 0 ? 5 : -5);
+                target._mp.Volume = Math.Clamp(target._mp.Volume + step, 0, 100);
+                target._volumeGauge.Volume = target._mp.Volume;
+                return (IntPtr)1; // swallow the message
+            }
+
+        }
+        return CallNextHookEx(IntPtr.Zero, nCode, wParam, lParam);
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct MSLLHOOKSTRUCT
+    {
+        public Point pt;
+        public uint mouseData;
+        public int flags;
+        public int time;
+        public IntPtr dwExtraInfo;
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
