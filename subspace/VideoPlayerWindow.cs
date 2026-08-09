@@ -13,6 +13,7 @@ public class VideoPlayerWindow : Form
     private readonly Button _playPauseBtn;
     private readonly SeekBar _seekBar;
     private readonly Label _timeLabel;
+    private readonly VolumeGauge _volumeGauge;
     private readonly System.Windows.Forms.Timer _timer;
     private readonly Stream _stream;
     private bool _ended;
@@ -36,13 +37,58 @@ public class VideoPlayerWindow : Form
         _videoView.MediaPlayer = _mp;
 
         var bottom = new Panel { Dock = DockStyle.Bottom, Height = 46, BackColor = Color.FromArgb(30, 30, 30) };
-        _playPauseBtn = new Button { Text = "Pause", Size = new Size(70, 30), Location = new Point(10, 8), BackColor = Color.FromArgb(70, 70, 70), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
-        _seekBar = new SeekBar { Location = new Point(92, 15), Width = 700, Height = 16 };
-        _timeLabel = new Label { Size = new Size(180, 22), Location = new Point(800, 12), ForeColor = Color.LightGray, Text = "00:00:00 / 00:00:00", AutoSize = false };
+        _playPauseBtn = new Button
+        {
+            Text = "Pause",
+            Size = new Size(70, 30),
+            BackColor = Color.FromArgb(70, 70, 70),
+            ForeColor = Color.White,
+            FlatStyle = FlatStyle.Flat,
+            Anchor = AnchorStyles.Left | AnchorStyles.Top,
+            Left = 10,
+            Top = 8
+        };
+        _seekBar = new SeekBar
+        {
+            Height = 16,
+            Left = 90,
+            Top = 15,
+            Width = 300,
+            Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top
+        };
+        _timeLabel = new Label
+        {
+            Size = new Size(130, 22),
+            ForeColor = Color.LightGray,
+            Text = "00:00:00 / 00:00:00",
+            AutoSize = false,
+            Top = 12
+        };
+        _volumeGauge = new VolumeGauge
+        {
+            Size = new Size(32, 32),
+            Top = 8,
+            Volume = _mp.Volume
+        };
 
         bottom.Controls.Add(_playPauseBtn);
         bottom.Controls.Add(_seekBar);
         bottom.Controls.Add(_timeLabel);
+        bottom.Controls.Add(_volumeGauge);
+
+        // Position right-aligned controls and stretch seekbar on resize
+        void LayoutBottomPanel() => PositionRightControls(bottom);
+        bottom.Resize += (_, _) => LayoutBottomPanel();
+        Shown += (_, _) => LayoutBottomPanel();
+
+        void PositionRightControls(Panel panel)
+        {
+            var margin = 8;
+            var gap = 6;
+            _volumeGauge.Left = panel.ClientSize.Width - margin - _volumeGauge.Width;
+            _timeLabel.Left = _volumeGauge.Left - gap - _timeLabel.Width;
+            _seekBar.Width = _timeLabel.Left - _seekBar.Left - gap;
+        }
 
         Controls.Add(_videoView);
         Controls.Add(bottom);
@@ -143,6 +189,7 @@ public class VideoPlayerWindow : Form
             _seekBar.Value = Math.Clamp((double)time / len, 0, 1);
             _timeLabel.Text = $"{Format(time)} / {Format(len)}";
         }
+        _volumeGauge.Volume = _mp.Volume;
     }
 
     private static string Format(long ms)
@@ -154,6 +201,7 @@ public class VideoPlayerWindow : Form
     protected override void OnMouseWheel(MouseEventArgs e)
     {
         _mp.Volume = Math.Clamp(_mp.Volume + (e.Delta > 0 ? 5 : -5), 0, 100);
+        _volumeGauge.Volume = _mp.Volume; // immediate visual feedback
         base.OnMouseWheel(e);
     }
 
@@ -169,6 +217,50 @@ public class VideoPlayerWindow : Form
         _closing = true;
         _timer.Stop();
         base.OnFormClosing(e);
+    }
+}
+
+// Draws a radial arc gauge indicating volume level (0–100).
+// Arc starts at 6 o'clock and sweeps clockwise; 0 volume = empty, 100 = full circle.
+public class VolumeGauge : Control
+{
+    private int _volume;
+    public int Volume
+    {
+        get => _volume;
+        set
+        {
+            var clamped = Math.Clamp(value, 0, 100);
+            if (clamped != _volume) { _volume = clamped; Invalidate(); }
+        }
+    }
+
+    public VolumeGauge()
+    {
+        BackColor = Color.FromArgb(30, 30, 30); // match bottom panel
+        DoubleBuffered = true;
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+
+        var size = Math.Min(Width, Height);
+        var margin = 4;
+        var rect = new Rectangle((Width - size) / 2, (Height - size) / 2, size - margin, size - margin);
+
+        // Background track (dim)
+        using var bgPen = new Pen(Color.FromArgb(80, 80, 80), 3);
+        g.DrawEllipse(bgPen, rect);
+
+        // Volume arc — starts at bottom (90°), sweeps clockwise
+        if (_volume > 0)
+        {
+            var sweepAngle = (float)(_volume / 100.0) * 360;
+            using var fgPen = new Pen(_volume <= 20 ? Color.Orange : Color.White, 3);
+            g.DrawArc(fgPen, rect, 90, sweepAngle);
+        }
     }
 }
 
