@@ -133,6 +133,27 @@ public static class ConsoleEvents
         return false;
     }
 
+    public static bool WaitForEvent(out ConsoleEventResult ev)
+    {
+        ev = default;
+        // ReadConsoleInput blocks until at least one event is available
+        if (ReadConsoleInput(ConsoleIn, out var rec, 1, out uint read) && read > 0)
+        {
+            if (rec.EventType == MOUSE_EVENT)
+            {
+                ev = new ConsoleEventResult(rec.Union.MouseEvent);
+                return true;
+            }
+            if (rec.EventType == KEY_EVENT)
+            {
+                var k = rec.Union.KeyEvent;
+                ev = new ConsoleEventResult((ConsoleKey)k.wVirtualKeyCode, (char)k.uChar, k.bKeyDown != 0);
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static bool EnableQuickEdit(bool enable)
     {
         if (GetConsoleMode(ConsoleIn, out uint mode))
@@ -146,6 +167,17 @@ public static class ConsoleEvents
             return ok;
         }
         return false;
+    }
+
+    public static bool EnableMouseInput(bool enable)
+    {
+        if (!GetConsoleMode(ConsoleIn, out uint mode)) return false;
+        const uint ENABLE_MOUSE_INPUT = 0x0010;
+        const uint ENABLE_EXTENDED_FLAGS = 0x0080;
+        var newMode = mode | ENABLE_EXTENDED_FLAGS;
+        if (enable) newMode |= ENABLE_MOUSE_INPUT;
+        else newMode &= ~ENABLE_MOUSE_INPUT;
+        return SetConsoleMode(ConsoleIn, newMode);
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]
