@@ -1,0 +1,86 @@
+{
+  "Categories": [
+    {
+      "Name": "LLMs (Heavy)",
+      "Items": [
+        { "Name": "Qwen 2.5 14B", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting Qwen 2.5 14B...'\""},
+        { "Name": "Gemma 2 27B", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting Gemma 2 27B...'\""},
+        { "Name": "Llama 3.1 70B", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting Llama 3.1 70B...'\""},
+        { "Name": "Mixtral 8x7B", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting Mixtral 8x7B...'\""},
+        { "Name": "Command R+", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting Command R+...'\""},
+        { "Name": "Yi 34B", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting Yi 34B...'\""}
+      ]
+    },
+    {
+      "Name": "LLMs (Light)",
+      "Items": [
+        { "Name": "Mistral 7B", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting Mistral 7B...'\""},
+        { "Name": "DeepSeek R1", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting DeepSeek R1...'\""},
+        { "Name": "Phi-3 Mini", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting Phi-3 Mini...'\""},
+        { "Name": "Gemma 2 9B", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting Gemma 2 9B...'\""},
+        { "Name": "Llama 3.2 3B", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting Llama 3.2 3B...'\""},
+        { "Name": "Qwen 2.5 7B", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting Qwen 2.5 7B...'\""}
+      ]
+    },
+    {
+      "Name": "Embedding",
+      "Items": [
+        { "Name": "nomic-embed", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting nomic-embed-text...'\""},
+        { "Name": "bge-large", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting bge-large-en...'\""},
+        { "Name": "text-embedding", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting text-embedding-3...'\""},
+        { "Name": "all-MiniLM", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting all-MiniLM-L6...'\""}
+      ]
+    },
+    {
+      "Name": "Image Gen",
+      "Items": [
+        { "Name": "Stable Diff.", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting Stable Diffusion XL...'\""},
+        { "Name": "Flux.1 Dev", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting Flux.1 Dev...'\""},
+        { "Name": "Flux.1 Schnell", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting Flux.1 Schnell...'\""},
+        { "Name": "SDXL Turbo", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting SDXL Turbo...'\""},
+        { "Name": "DALL-E Local", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting DALL-E Local...'\""}
+      ]
+    },
+    {
+      "Name": "Audio / Speech",
+      "Items": [
+        { "Name": "Whisper Large", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting Whisper Large v3...'\""},
+        { "Name": "Whisper Medium", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting Whisper Medium...'\""},
+        { "Name": "Faster-Whisp.", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting Faster-Whisper...'\""},
+        { "Name": "Bark TTS", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting Bark TTS...'\""},
+        { "Name": "Coqui TTS", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting Coqui TTS...'\""}
+      ]
+    },
+    {
+      "Name": "Data Utilities",
+      "Items": [
+        { "Name": "Terminal", "Path": "wt.exe", "Args": "" },
+        { "Name": "VS Code", "Path": "code", "Args": "." },
+        { "Name": "File Explorer", "Path": "explorer", "Args": "." },
+        { "Name": "Notepad++", "Path": "notepad++", "Args": "" },
+        { "Name": "SQLite Browser", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting DB Browser...'\""}
+      ]
+    },
+    {
+      "Name": "Dev Servers",
+      "Items": [
+        { "Name": "Ollama", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting Ollama server...'\""},
+        { "Name": "LM Studio", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting LM Studio...'\""},
+        { "Name": "Text Gen Web", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting text-generation-webui...'\""},
+        { "Name": "Open WebUI", "Path": "powershell", "Args": "-NoExit -Command \"Write-Host 'Starting Open WebUI...'\""},
+        { "Name": "FastAPI Docs", "Path": "powershell", "Args": "-NoExit -Command \"Start 'http://localhost:8000/docs'\""}
+      ]
+    },
+    {
+      "Name": "System Controls",
+      "Items": [
+        { "Name": "Settings", "Path": "ms-settings:", "Args": "" },
+        { "Name": "Task Manager", "Path": "taskmgr.exe", "Args": "" },
+        { "Name": "PowerShell", "Path": "pwsh.exe", "Args": "-NoExit" },
+        { "Name": "Cmd Prompt", "Path": "cmd.exe", "Args": "" },
+        { "Name": "Registry", "Path": "regedit.exe", "Args": "" },
+        { "Name": "Services", "Path": "services.msc", "Args": "" }
+      ]
+    }
+  ]
+}
