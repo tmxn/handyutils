@@ -27,6 +27,7 @@ public partial class LauncherForm : Form
     private List<GlassButton> _categoryButtons = new();
     private List<CategoryData> _categories = new();
     private CategoryData? _activeCategory;
+    private int _selectedCategoryIndex = -1;
     private LauncherPalette _palette;
 
     private static readonly Font CommandFont = new("Consolas", 9f, FontStyle.Regular);
@@ -160,8 +161,9 @@ public partial class LauncherForm : Form
 
         int btnWidth = _leftPanel.Width - _leftPanel.Padding.Left - _leftPanel.Padding.Right;
 
-        foreach (var category in _categories)
+        for (int i = 0; i < _categories.Count; i++)
         {
+            var category = _categories[i];
             var btn = new GlassButton
             {
                 Text = category.Name,
@@ -171,31 +173,38 @@ public partial class LauncherForm : Form
                 Cursor = Cursors.Default
             };
 
-            SetupCategoryHoverEvents(btn, category);
+            SetupCategoryHoverEvents(btn, i);
             _categoryButtons.Add(btn);
             _leftPanel.Controls.Add(btn);
         }
 
         if (_categoryButtons.Count > 0)
         {
-            _categoryButtons[0].IsSelected = true;
-            _activeCategory = _categories[0];
-            PopulateRightGrid(_categories[0].Items);
+            SelectCategory(0);
         }
     }
 
-    private void SetupCategoryHoverEvents(GlassButton categoryButton, CategoryData category)
+    private void SetupCategoryHoverEvents(GlassButton categoryButton, int index)
     {
         categoryButton.MouseEnter += (s, e) =>
         {
-            foreach (GlassButton btn in _categoryButtons)
-                btn.IsSelected = false;
-
-            categoryButton.IsSelected = true;
-
-            _activeCategory = category;
-            PopulateRightGrid(category.Items);
+            SelectCategory(index);
         };
+    }
+
+    private void SelectCategory(int index)
+    {
+        if (index < 0 || index >= _categories.Count)
+            return;
+
+        foreach (GlassButton btn in _categoryButtons)
+            btn.IsSelected = false;
+
+        _selectedCategoryIndex = index;
+        _categoryButtons[index].IsSelected = true;
+
+        _activeCategory = _categories[index];
+        PopulateRightGrid(_categories[index].Items);
     }
 
     private void PopulateRightGrid(List<LauncherItem> items)
@@ -261,6 +270,26 @@ public partial class LauncherForm : Form
         int rightHeight = _rightPanel.Padding.Top + _rightPanel.Padding.Bottom + rows * (44 + 6);
 
         Height = Math.Max(leftHeight, rightHeight) + _commandPreview.Height;
+    }
+
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        if (_categoryButtons.Count == 0)
+        {
+            base.OnMouseWheel(e);
+            return;
+        }
+
+        int direction = e.Delta > 0 ? -1 : 1;
+        int newIndex = _selectedCategoryIndex + direction;
+
+        if (newIndex >= 0 && newIndex < _categories.Count)
+        {
+            SelectCategory(newIndex);
+            return;
+        }
+
+        base.OnMouseWheel(e);
     }
 
     public void ShowAtCursor()
