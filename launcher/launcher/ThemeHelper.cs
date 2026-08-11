@@ -16,6 +16,9 @@ public readonly record struct LauncherPalette(
 
 public static class ThemeHelper
 {
+    /// <summary>Set once Mica is confirmed to be active on the current window/OS.</summary>
+    public static bool MicaEnabled { get; set; }
+
     public static bool IsDarkMode()
     {
         try
@@ -34,9 +37,37 @@ public static class ThemeHelper
 
     public static LauncherPalette GetPalette()
     {
-        if (IsDarkMode())
+        bool dark = IsDarkMode();
+
+        if (MicaEnabled)
         {
-            // Fluent-inspired dark palette
+            // Translucent Fluent "cards" drawn over the DWM Mica backdrop.
+            return dark
+                ? new LauncherPalette(
+                    FormBackground: Color.Black,
+                    LeftPanelBackground: Color.Transparent,
+                    RightPanelBackground: Color.Transparent,
+                    FormBorder: Color.FromArgb(32, 255, 255, 255),
+                    ButtonBackground: Color.FromArgb(48, 255, 255, 255),
+                    ButtonHoverBackground: Color.FromArgb(86, 255, 255, 255),
+                    ButtonSelectedBackground: Color.FromArgb(70, 0, 120, 215),
+                    ButtonBorder: Color.FromArgb(30, 255, 255, 255),
+                    Text: Color.FromArgb(243, 243, 243))
+                : new LauncherPalette(
+                    FormBackground: Color.Black,
+                    LeftPanelBackground: Color.Transparent,
+                    RightPanelBackground: Color.Transparent,
+                    FormBorder: Color.FromArgb(36, 0, 0, 0),
+                    ButtonBackground: Color.FromArgb(110, 255, 255, 255),
+                    ButtonHoverBackground: Color.FromArgb(140, 255, 255, 255),
+                    ButtonSelectedBackground: Color.FromArgb(120, 0, 120, 215),
+                    ButtonBorder: Color.FromArgb(40, 0, 0, 0),
+                    Text: Color.FromArgb(28, 28, 28));
+        }
+
+        if (dark)
+        {
+            // Fluent-inspired dark palette (fallback when Mica is unavailable)
             return new LauncherPalette(
                 FormBackground: Color.FromArgb(32, 32, 32),
                 LeftPanelBackground: Color.FromArgb(43, 43, 43),
@@ -49,7 +80,7 @@ public static class ThemeHelper
                 Text: Color.FromArgb(243, 243, 243));
         }
 
-        // Fluent-inspired light palette
+        // Fluent-inspired light palette (fallback when Mica is unavailable)
         return new LauncherPalette(
             FormBackground: Color.FromArgb(243, 243, 243),
             LeftPanelBackground: Color.FromArgb(251, 251, 251),

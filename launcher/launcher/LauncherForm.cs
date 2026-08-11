@@ -22,19 +22,14 @@ public partial class LauncherForm : Form
     }
 
     private FlowLayoutPanel _leftPanel = new();
-    private FlowLayoutPanel _rightPanel = new();
-    private Label _commandPreview = new();
+    private ItemGrid _rightPanel = new();
     private List<GlassButton> _categoryButtons = new();
     private List<CategoryData> _categories = new();
     private CategoryData? _activeCategory;
     private int _selectedCategoryIndex = -1;
     private LauncherPalette _palette;
 
-    private static readonly Font CommandFont = new("Consolas", 9f, FontStyle.Regular);
-
     private static readonly Font CategoryFont = new("Segoe UI", 10f, FontStyle.Bold);
-    private static readonly Font ItemFont = new("Segoe UI", 9.5f, FontStyle.Regular);
-    private static readonly Font EmptyFont = new("Segoe UI", 9f, FontStyle.Regular);
 
     public LauncherForm()
     {
@@ -44,6 +39,9 @@ public partial class LauncherForm : Form
         TopMost = true;
         Width = 640;
         DoubleBuffered = true;
+
+        // Black canvas lets the DWM Mica backdrop blend through unpainted pixels.
+        BackColor = Color.Black;
 
         SetStyle(ControlStyles.AllPaintingInWmPaint |
                  ControlStyles.OptimizedDoubleBuffer |
@@ -58,23 +56,19 @@ public partial class LauncherForm : Form
         _leftPanel.Padding = new Padding(6, 6, 6, 6);
         _leftPanel.Margin = Padding.Empty;
 
-        // Right panel: flow grid for items (75%)
+        // Right pane: single owner-drawn control that paints every item card in
+        // one atomic, double-buffered pass (no per-button flicker).
         _rightPanel.Dock = DockStyle.Fill;
-        _rightPanel.WrapContents = true;
-        _rightPanel.AutoScroll = true;
-        _rightPanel.AutoSize = false;
         _rightPanel.Padding = new Padding(6, 6, 6, 6);
         _rightPanel.Margin = Padding.Empty;
+        _rightPanel.PreviewRequested = item => _rightPanel.PreviewText = FormatCommand(item.Path, item.Args);
+        _rightPanel.PreviewCleared = () => _rightPanel.PreviewText = "";
+        _rightPanel.ItemActivated = item =>
+        {
+            ExecuteScript(item.Path, item.Args);
+            Application.Exit();
+        };
 
-        // Command preview bar at bottom
-        _commandPreview.Dock = DockStyle.Bottom;
-        _commandPreview.Height = 26;
-        _commandPreview.Font = CommandFont;
-        _commandPreview.Padding = new Padding(8, 4, 8, 4);
-        _commandPreview.Text = "";
-        _commandPreview.AutoEllipsis = true;
-
-        Controls.Add(_commandPreview);
         Controls.Add(_rightPanel);
         Controls.Add(_leftPanel);
 
@@ -86,6 +80,20 @@ public partial class LauncherForm : Form
     {
         base.OnHandleCreated(e);
         ApplyNativeWindowEffects();
+    }
+
+    // Do not let WinForms erase the client area with an opaque system color.
+    // In Mica mode we erase to fully transparent so the DWM backdrop shows and
+    // stale pixels from previous layouts / preview text are cleared on repaint.
+    protected override void OnPaintBackground(PaintEventArgs e)
+    {
+        if (ThemeHelper.MicaEnabled)
+        {
+            e.Graphics.Clear(Color.Transparent);
+            return;
+        }
+
+        base.OnPaintBackground(e);
     }
 
     protected override void OnLoad(EventArgs e)
@@ -123,19 +131,26 @@ public partial class LauncherForm : Form
     {
         _palette = ThemeHelper.GetPalette();
 
-        BackColor = _palette.FormBackground;
-        _leftPanel.BackColor = _palette.LeftPanelBackground;
-        _rightPanel.BackColor = _palette.RightPanelBackground;
-        _commandPreview.BackColor = _palette.FormBackground;
-        _commandPreview.ForeColor = ThemeHelper.IsDarkMode()
-            ? Color.FromArgb(180, 180, 180)
-            : Color.FromArgb(80, 80, 80);
+        if (ThemeHelper.MicaEnabled)
+        {
+            // Mica mode: the form is a transparent canvas, panels show the backdrop.
+            BackColor = Color.Black;
+            _leftPanel.BackColor = Color.Transparent;
+            _rightPanel.BackColor = Color.Transparent;
+        }
+        else
+        {
+            // Fallback (no Mica): solid opaque surfaces.
+            BackColor = _palette.FormBackground;
+            _leftPanel.BackColor = _palette.LeftPanelBackground;
+            _rightPanel.BackColor = _palette.RightPanelBackground;
+        }
 
         ApplyNativeWindowEffects();
 
         Invalidate(true);
+        _rightPanel.Invalidate();
         foreach (Control c in _leftPanel.Controls) c.Invalidate();
-        foreach (Control c in _rightPanel.Controls) c.Invalidate();
     }
 
     private void ApplyNativeWindowEffects()
@@ -143,7 +158,13 @@ public partial class LauncherForm : Form
         if (!IsHandleCreated)
             return;
 
-        GlassInterop.EnableNativeWindowEffects(Handle, ThemeHelper.IsDarkMode());
+        bool dark = ThemeHelper.IsDarkMode();
+        bool mica = GlassInterop.EnableMica(Handle, dark);
+        if (mica != ThemeHelper.MicaEnabled)
+        {
+            ThemeHelper.MicaEnabled = mica;
+            ApplyTheme();
+        }
     }
 
     private void LoadConfig()
@@ -209,52 +230,13 @@ public partial class LauncherForm : Form
 
     private void PopulateRightGrid(List<LauncherItem> items)
     {
-        _rightPanel.Controls.Clear();
-
-        if (items == null || items.Count == 0)
-        {
-            var emptyLabel = new Label
-            {
-                Text = "No items in this category",
-                ForeColor = ThemeHelper.IsDarkMode() ? Color.FromArgb(165, 165, 165) : Color.FromArgb(110, 110, 110),
-                Font = EmptyFont,
-                AutoSize = true,
-                BackColor = _rightPanel.BackColor
-            };
-            _rightPanel.Controls.Add(emptyLabel);
-            AutoSizeWindow();
-            return;
-        }
-
-        foreach (var item in items)
-        {
-            var btn = new GlassButton
-            {
-                Text = item.Name,
-                Font = ItemFont,
-                Size = new Size(150, 44),
-                Margin = new Padding(3, 3, 3, 3),
-                Cursor = Cursors.Hand
-            };
-
-            btn.MouseEnter += (s, e) =>
-            {
-                _commandPreview.Text = FormatCommand(item.Path, item.Args);
-            };
-            btn.MouseLeave += (s, e) =>
-            {
-                _commandPreview.Text = "";
-            };
-            btn.Click += (s, e) =>
-            {
-                ExecuteScript(item.Path, item.Args);
-                Application.Exit();
-            };
-
-            _rightPanel.Controls.Add(btn);
-        }
-
+        _rightPanel.Items = items;
         AutoSizeWindow();
+
+        // The owner-drawn grid repaints as a single atomic frame; a synchronous
+        // refresh here (~runtime only) makes the switch feel instant and smooth.
+        if (Visible)
+            Refresh();
     }
 
     private void AutoSizeWindow()
@@ -263,13 +245,13 @@ public partial class LauncherForm : Form
         int leftHeight = _leftPanel.Padding.Top + _leftPanel.Padding.Bottom
             + _categoryButtons.Count * (68 + 3) - 3;
 
-        // Right panel height: padding + rows * (btnHeight + topMargin + bottomMargin)
+        // Right pane height: items content + preview line.
         int maxItems = _categories.Count > 0 ? _categories.Max(c => c.Items?.Count ?? 0) : 0;
         int cols = Math.Max(1, (_rightPanel.Width - _rightPanel.Padding.Left - _rightPanel.Padding.Right) / (150 + 6));
         int rows = (int)Math.Ceiling((double)maxItems / cols);
-        int rightHeight = _rightPanel.Padding.Top + _rightPanel.Padding.Bottom + rows * (44 + 6);
+        int rightHeight = _rightPanel.Padding.Top + _rightPanel.Padding.Bottom + rows * (44 + 6) + 26;
 
-        Height = Math.Max(leftHeight, rightHeight) + _commandPreview.Height;
+        Height = Math.Max(leftHeight, rightHeight);
     }
 
     protected override void OnMouseWheel(MouseEventArgs e)
@@ -311,10 +293,23 @@ public partial class LauncherForm : Form
         Activate();
     }
 
+    // A deactivate can be raised while the form is still being shown (inside the
+    // show's nested message pump). Closing then would dispose the form before the
+    // framework finishes SetVisibleCore -> ObjectDisposedException. So we only arm
+    // the auto-close once the window is fully displayed and the queue is idle.
+    private bool _closeOnDeactivate;
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        BeginInvoke(new Action(() => _closeOnDeactivate = true));
+    }
+
     protected override void OnDeactivate(EventArgs e)
     {
         base.OnDeactivate(e);
-        Close();
+        if (_closeOnDeactivate && !IsDisposed)
+            Close();
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
