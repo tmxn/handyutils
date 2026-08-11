@@ -19,6 +19,38 @@ public static class ThemeHelper
     /// <summary>Set once Mica is confirmed to be active on the current window/OS.</summary>
     public static bool MicaEnabled { get; set; }
 
+    private static Color GetSystemAccentColor()
+    {
+        try
+        {
+            // Windows stores the accent as 0x00BBGGRR in the registry.
+            using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Accent");
+            if (key != null)
+            {
+                if (key.GetValue("AccentColor") is int acc)
+                {
+                    int r = acc & 0xFF;
+                    int g = (acc >> 8) & 0xFF;
+                    int b = (acc >> 16) & 0xFF;
+                    if (r != 0 || g != 0 || b != 0)
+                        return Color.FromArgb(r, g, b);
+                }
+            }
+            // Fallback to DWM ColorizationColor
+            using var dwmKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\DWM");
+            if (dwmKey != null && dwmKey.GetValue("ColorizationColor") is int col)
+            {
+                int r = col & 0xFF;
+                int g = (col >> 8) & 0xFF;
+                int b = (col >> 16) & 0xFF;
+                return Color.FromArgb(r, g, b);
+            }
+        }
+        catch { }
+        // Default Fluent blue
+        return Color.FromArgb(0, 120, 215);
+    }
+
     public static bool IsDarkMode()
     {
         try
@@ -42,6 +74,7 @@ public static class ThemeHelper
         if (MicaEnabled)
         {
             // Translucent Fluent "cards" drawn over the DWM Mica backdrop.
+            // Selected state uses the same white-ish hover colour as the hover state.
             return dark
                 ? new LauncherPalette(
                     FormBackground: Color.Black,
@@ -50,7 +83,7 @@ public static class ThemeHelper
                     FormBorder: Color.FromArgb(32, 255, 255, 255),
                     ButtonBackground: Color.FromArgb(48, 255, 255, 255),
                     ButtonHoverBackground: Color.FromArgb(86, 255, 255, 255),
-                    ButtonSelectedBackground: Color.FromArgb(70, 0, 120, 215),
+                    ButtonSelectedBackground: Color.FromArgb(86, 255, 255, 255),
                     ButtonBorder: Color.FromArgb(30, 255, 255, 255),
                     Text: Color.FromArgb(243, 243, 243))
                 : new LauncherPalette(
@@ -60,7 +93,7 @@ public static class ThemeHelper
                     FormBorder: Color.FromArgb(36, 0, 0, 0),
                     ButtonBackground: Color.FromArgb(110, 255, 255, 255),
                     ButtonHoverBackground: Color.FromArgb(140, 255, 255, 255),
-                    ButtonSelectedBackground: Color.FromArgb(120, 0, 120, 215),
+                    ButtonSelectedBackground: Color.FromArgb(140, 255, 255, 255),
                     ButtonBorder: Color.FromArgb(40, 0, 0, 0),
                     Text: Color.FromArgb(28, 28, 28));
         }
