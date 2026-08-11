@@ -91,7 +91,6 @@ public static class Program
         Console.Clear();
         DrawTitleDirect();
         Console.WriteLine();
-        Console.WriteLine("  Enter PIN: ");
         var entered = "";
         while (true)
         {
