@@ -74,8 +74,16 @@ public class GlassButton : Control
         g.FillPath(brush, path);
         g.DrawPath(pen, path);
 
-        TextRenderer.DrawText(g, Text, Font, outer, palette.Text,
-            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        // Use GDI+ DrawString with AntiAlias for Mica compatibility
+        g.TextRenderingHint = TextRenderingHint.AntiAlias;
+        using var textBrush = new SolidBrush(palette.Text);
+        using var format = new StringFormat
+        {
+            Alignment = StringAlignment.Center,
+            LineAlignment = StringAlignment.Center,
+            Trimming = StringTrimming.EllipsisCharacter
+        };
+        g.DrawString(Text, Font, textBrush, outer, format);
     }
 
     private static GraphicsPath CreateRoundedPath(Rectangle r, int radius)

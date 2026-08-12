@@ -195,9 +195,14 @@ public sealed class ItemGrid : Control
 
         if (_items == null || _items.Count == 0)
         {
-            TextRenderer.DrawText(g, "No items in this category", EmptyFont,
-                new Rectangle(0, 0, Width, Height), palette.Text,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            g.TextRenderingHint = TextRenderingHint.AntiAlias;
+            using var emptyBrush = new SolidBrush(palette.Text);
+            using var emptyFormat = new StringFormat
+            {
+                Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center
+            };
+            g.DrawString("No items in this category", EmptyFont, emptyBrush, new Rectangle(0, 0, Width, Height), emptyFormat);
             return;
         }
 
@@ -219,8 +224,15 @@ public sealed class ItemGrid : Control
             g.FillPath(brush, path);
             g.DrawPath(pen, path);
 
-            TextRenderer.DrawText(g, _items[i].Name, ItemFont, bounds, palette.Text,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            g.TextRenderingHint = TextRenderingHint.AntiAlias;
+            using var itemBrush = new SolidBrush(palette.Text);
+            using var itemFormat = new StringFormat
+            {
+                Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center,
+                Trimming = StringTrimming.EllipsisCharacter
+            };
+            g.DrawString(_items[i].Name, ItemFont, itemBrush, bounds, itemFormat);
         }
 
         // Bottom command-preview line (same width as the grid). Drawn last (over
