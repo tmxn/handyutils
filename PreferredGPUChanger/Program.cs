@@ -1,11 +1,13 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
+using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
+using GpuVramMonitor;
 
 namespace HeadlessGpuManager;
 
@@ -30,6 +32,7 @@ public class MainManagerForm : Form
     private Button _clearPrefBtn = null!;
     private Button _toggleKeeperBtn = null!;
     private Label _keeperStatusLabel = null!;
+    private Label _vramLabel = null!;
     private System.Windows.Forms.Timer _statusTimer = null!;
 
     private const string RegPath = @"Software\Microsoft\DirectX\UserGpuPreferences";
@@ -38,6 +41,7 @@ public class MainManagerForm : Form
     public MainManagerForm()
     {
         InitializeUiComponents();
+        UpdateVramDisplay();
         ConfigureStatusTimer();
         LoadProcessList();
     }
@@ -59,7 +63,9 @@ public class MainManagerForm : Form
         _refreshBtn = new Button { Text = "Refresh Process Tree", Top = 10, Left = 520, Width = 150, Height = 28 };
         _refreshBtn.Click += (s, e) => LoadProcessList();
 
-        topPanel.Controls.AddRange(new Control[] { ramLabel, _ramFilterInput, _gfxFilterCheckbox, _refreshBtn });
+        _vramLabel = new Label { Text = "VRAM: querying...", Top = 16, Left = 690, AutoSize = true, ForeColor = Color.DarkSlateGray };
+
+        topPanel.Controls.AddRange(new Control[] { ramLabel, _ramFilterInput, _gfxFilterCheckbox, _refreshBtn, _vramLabel });
 
         // Bottom Operations Panel
         Panel bottomPanel = new Panel { Dock = DockStyle.Bottom, Height = 85, BackColor = Color.FromArgb(230, 235, 240) };
@@ -110,10 +116,33 @@ public class MainManagerForm : Form
         this.Controls.AddRange(new Control[] { _processGrid, topPanel, bottomPanel });
     }
 
+    private void UpdateVramDisplay()
+    {
+        var gpus = GpuVramReader.GetVramUsage();
+
+        if (gpus.Count == 0)
+        {
+            _vramLabel.Text = "VRAM: No physical GPUs detected";
+            return;
+        }
+
+        var parts = new List<string>();
+        foreach (var gpu in gpus)
+        {
+            parts.Add($"GPU {gpu.Index}: {gpu.UsedMb:F0} MB");
+        }
+
+        _vramLabel.Text = "VRAM: " + string.Join("  |  ", parts);
+    }
+
     private void ConfigureStatusTimer()
     {
         _statusTimer = new System.Windows.Forms.Timer { Interval = 1000 };
-        _statusTimer.Tick += (s, e) => InspectKeeperProcessStatus();
+        _statusTimer.Tick += (s, e) =>
+        {
+            InspectKeeperProcessStatus();
+            UpdateVramDisplay();
+        };
         _statusTimer.Start();
     }
 
