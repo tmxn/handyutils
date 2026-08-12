@@ -5,6 +5,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Win32;
 using GpuVramMonitor;
@@ -41,9 +42,25 @@ public class MainManagerForm : Form
     public MainManagerForm()
     {
         InitializeUiComponents();
-        UpdateVramDisplay();
         ConfigureStatusTimer();
-        LoadProcessList();
+        // Defer heavy work so the form appears immediately
+        _ = Task.Run(LoadInitialData);
+    }
+
+    private void LoadInitialData()
+    {
+        try
+        {
+            UpdateVramDisplay();
+            LoadProcessList();
+        }
+        catch (Exception ex)
+        {
+            if (!this.IsDisposed)
+            {
+                this.Invoke(() => MessageBox.Show($"Failed to load data: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error));
+            }
+        }
     }
 
     private void InitializeUiComponents()
@@ -61,7 +78,7 @@ public class MainManagerForm : Form
 
         _gfxFilterCheckbox = new CheckBox { Text = "Graphics Engine Apps Only (DXGI/D3D/Vulkan)", Top = 14, Left = 190, AutoSize = true, Checked = false };
         _refreshBtn = new Button { Text = "Refresh Process Tree", Top = 10, Left = 520, Width = 150, Height = 28 };
-        _refreshBtn.Click += (s, e) => LoadProcessList();
+        _refreshBtn.Click += (s, e) => _ = Task.Run(LoadProcessList);
 
         _vramLabel = new Label { Text = "VRAM: querying...", Top = 16, Left = 690, AutoSize = true, ForeColor = Color.DarkSlateGray };
 
@@ -120,22 +137,17 @@ public class MainManagerForm : Form
     {
         var gpus = GpuVramReader.GetVramUsage();
 
-        if (gpus.Count == 0)
-        {
-            _vramLabel.Text = "VRAM: No physical GPUs detected";
-            return;
-        }
+        string text = gpus.Count == 0
+            ? "VRAM: No physical GPUs detected"
+            : "VRAM: " + string.Join("  |  ", gpus.Select(gpu =>
+            {
+                string vramStr = gpu.UsedMb >= 1024
+                    ? $"{gpu.UsedMb / 1024.0:F1} GB"
+                    : $"{gpu.UsedMb:F0} MB";
+                return $"GPU {gpu.Index}: {vramStr}";
+            }));
 
-        var parts = new List<string>();
-        foreach (var gpu in gpus)
-        {
-            string vramStr = gpu.UsedMb >= 1024
-                ? $"{gpu.UsedMb / 1024.0:F1} GB"
-                : $"{gpu.UsedMb:F0} MB";
-            parts.Add($"GPU {gpu.Index}: {vramStr}");
-        }
-
-        _vramLabel.Text = "VRAM: " + string.Join("  |  ", parts);
+        this.Invoke(() => _vramLabel.Text = text);
     }
 
     private void ConfigureStatusTimer()
@@ -151,10 +163,42 @@ public class MainManagerForm : Form
 
     private void LoadProcessList()
     {
-        _processGrid.Rows.Clear();
-        long minRamBytes = (long)_ramFilterInput.Value * 1024 * 1024;
-        bool gfxOnly = _gfxFilterCheckbox.Checked;
+        // Capture UI values on the UI thread before going to background
+        long minRamBytes = 0;
+        bool gfxOnly = false;
+        this.Invoke((Action)(() =>
+        {
+            minRamBytes = (long)_ramFilterInput.Value * 1024 * 1024;
+            gfxOnly = _gfxFilterCheckbox.Checked;
+        }));
 
+        // Gather data on background thread, update UI via Invoke
+        var rows = CollectProcessRows(minRamBytes, gfxOnly);
+        if (this.IsDisposed) return;
+        this.Invoke(() =>
+        {
+            _processGrid.SuspendLayout();
+            try
+            {
+                _processGrid.Rows.Clear();
+                foreach (object[] row in rows)
+                {
+                    _processGrid.Rows.Add(row[0], row[1], row[2], row[3], row[4], row[5]);
+                }
+            }
+            finally
+            {
+                _processGrid.ResumeLayout();
+            }
+        });
+    }
+
+    private object[] CollectProcessRows(long minRamBytes, bool gfxOnly)
+    {
+        // Cache registry key — open once, not per process
+        using RegistryKey? regKey = Registry.CurrentUser.OpenSubKey(RegPath);
+
+        var rows = new List<object[]>();
         var runningProcesses = Process.GetProcesses().OrderByDescending(p => p.WorkingSet64);
 
         foreach (var proc in runningProcesses)
@@ -187,8 +231,7 @@ public class MainManagerForm : Form
             string activeRegistryRule = "None (System Managed)";
             if (exePath != "Unknown (Access Denied)")
             {
-                using RegistryKey? key = Registry.CurrentUser.OpenSubKey(RegPath);
-                var val = key?.GetValue(exePath);
+                var val = regKey?.GetValue(exePath);
                 if (val != null)
                 {
                     activeRegistryRule = val.ToString() switch
@@ -200,15 +243,18 @@ public class MainManagerForm : Form
                 }
             }
 
-            _processGrid.Rows.Add(
+            rows.Add(new object[]
+            {
                 proc.ProcessName,
                 proc.Id,
                 (proc.WorkingSet64 / 1024 / 1024).ToString("N0"),
-                                  mapsGraphics ? "YES" : "No",
-                                  activeRegistryRule,
-                                  exePath
-            );
+                mapsGraphics ? "YES" : "No",
+                activeRegistryRule,
+                exePath
+            });
         }
+
+        return rows.ToArray();
     }
 
     private void OnGridSelectionChanged(object? sender, EventArgs e)
