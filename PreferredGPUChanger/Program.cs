@@ -129,7 +129,10 @@ public class MainManagerForm : Form
         var parts = new List<string>();
         foreach (var gpu in gpus)
         {
-            parts.Add($"GPU {gpu.Index}: {gpu.UsedMb:F0} MB");
+            string vramStr = gpu.UsedMb >= 1024
+                ? $"{gpu.UsedMb / 1024.0:F1} GB"
+                : $"{gpu.UsedMb:F0} MB";
+            parts.Add($"GPU {gpu.Index}: {vramStr}");
         }
 
         _vramLabel.Text = "VRAM: " + string.Join("  |  ", parts);
