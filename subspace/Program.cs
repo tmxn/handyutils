@@ -534,7 +534,7 @@ public static class Program
         var frac = len > 0 ? Math.Clamp((double)time / len, 0, 1) : 0;
 
         // Top bar
-        var top = $"  ♪ Now Playing: {Truncate(title, w - 14)}".PadRight(w - 1, ' ');
+        var top = $"  ♪ Now Playing".PadRight(w - 1, ' ');
         for (int x = 0; x < top.Length; x++)
             term.SetCell(x, 0, top[x], ConsoleColor.White, ConsoleColor.DarkGreen);
 
