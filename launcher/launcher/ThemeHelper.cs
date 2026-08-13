@@ -92,8 +92,8 @@ public static class ThemeHelper
                     RightPanelBackground: Color.Transparent,
                     FormBorder: Color.FromArgb(36, 0, 0, 0),
                     ButtonBackground: Color.FromArgb(110, 255, 255, 255),
-                    ButtonHoverBackground: Color.FromArgb(140, 255, 255, 255),
-                    ButtonSelectedBackground: Color.FromArgb(140, 255, 255, 255),
+                    ButtonHoverBackground: Color.FromArgb(140, 160, 230, 250),
+                    ButtonSelectedBackground: Color.FromArgb(140, 160, 230, 250),
                     ButtonBorder: Color.FromArgb(40, 0, 0, 0),
                     Text: Color.FromArgb(28, 28, 28));
         }
@@ -120,8 +120,8 @@ public static class ThemeHelper
             RightPanelBackground: Color.FromArgb(247, 247, 247),
             FormBorder: Color.FromArgb(206, 206, 206),
             ButtonBackground: Color.FromArgb(255, 255, 255),
-            ButtonHoverBackground: Color.FromArgb(243, 247, 253),
-            ButtonSelectedBackground: Color.FromArgb(233, 241, 253),
+            ButtonHoverBackground: Color.FromArgb(200, 240, 250),
+            ButtonSelectedBackground: Color.FromArgb(180, 230, 245),
             ButtonBorder: Color.FromArgb(208, 215, 226),
             Text: Color.FromArgb(28, 28, 28));
     }
