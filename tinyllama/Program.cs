@@ -8,7 +8,8 @@ namespace TinyLlama;
 static class Program
 {
     private const int MaxLogLines = 500;
-    private const string LlamafilePath = @"D:\llama\Qwen3.5-0.8B-Q8_0.llamafile.exe";
+    private const string DefaultLlamafilePath = @"D:\llama\Qwen3.5-0.8B-Q8_0.llamafile.exe";
+    private const string ConfigFileName = "tinyllama.txt";
 
     private static readonly Queue<string> _logLines = new();
     private static readonly object _logLock = new();
@@ -63,7 +64,7 @@ static class Program
     {
         var psi = new ProcessStartInfo
         {
-            FileName = LlamafilePath,
+            FileName = ResolveLlamafilePath(),
             Arguments = "--server --host 0.0.0.0 --jinja --ctx-size 1024 --port 8081",
             UseShellExecute = false,
             RedirectStandardOutput = true,
@@ -95,6 +96,29 @@ static class Program
         _llamaProcess.Start();
         _llamaProcess.BeginOutputReadLine();
         _llamaProcess.BeginErrorReadLine();
+    }
+
+    static string ResolveLlamafilePath()
+    {
+        var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppDomain.CurrentDomain.BaseDirectory;
+        var configPath = Path.Combine(exeDir, ConfigFileName);
+        AddLogLine("*** Exe dir: " + exeDir);
+        AddLogLine("*** Config file: " + configPath);
+        AddLogLine("*** Config exists: " + File.Exists(configPath));
+
+        if (File.Exists(configPath))
+        {
+            var path = File.ReadAllText(configPath).Trim();
+            AddLogLine("*** Read path: [" + path + "]");
+            AddLogLine("*** Path exists: " + File.Exists(path));
+            if (!string.IsNullOrEmpty(path) && File.Exists(path))
+            {
+                AddLogLine("*** Using config path: " + path);
+                return path;
+            }
+        }
+        AddLogLine("*** Falling back to default: " + DefaultLlamafilePath);
+        return DefaultLlamafilePath;
     }
 
     static void AddLogLine(string line)
