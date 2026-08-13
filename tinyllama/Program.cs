@@ -7,7 +7,7 @@ namespace TinyLlama;
 
 static class Program
 {
-    private const int MaxLogLines = 30;
+    private const int MaxLogLines = 500;
     private const string LlamafilePath = @"D:\llama\Qwen3.5-0.8B-Q8_0.llamafile.exe";
 
     private static readonly Queue<string> _logLines = new();
@@ -18,6 +18,7 @@ static class Program
     private static System.Windows.Forms.Timer? _tooltipTimer;
     private static Process? _llamaProcess;
     private static CancellationTokenSource? _cts;
+    private static ConsoleForm? _consoleForm;
 
     [STAThread]
     static void Main()
@@ -27,6 +28,7 @@ static class Program
 
         // Build tray menu
         var menu = new ContextMenuStrip();
+        var consoleMenuItem = menu.Items.Add("Console", null, (_, _) => ToggleConsole());
         menu.Items.Add("Exit", null, (_, _) => Shutdown());
 
         // Create tray icon
@@ -38,8 +40,8 @@ static class Program
             Visible = true,
         };
 
-        // Double-click to show log
-        _trayIcon.DoubleClick += (_, _) => ShowLog();
+        // Double-click to toggle console
+        _trayIcon.DoubleClick += (_, _) => ToggleConsole();
 
         // Update tooltip every 2 seconds
         _tooltipTimer = new System.Windows.Forms.Timer { Interval = 2000 };
@@ -105,7 +107,7 @@ static class Program
         }
     }
 
-    static string GetLogText()
+    internal static string GetLogText()
     {
         lock (_logLock)
         {
@@ -127,15 +129,20 @@ static class Program
         _trayIcon.Text = "TinyLlama\n" + log;
     }
 
-    static void ShowLog()
+    static void ToggleConsole()
     {
-        // Show full log in a message box (limited to last 30 lines)
-        var log = GetLogText();
-        MessageBox.Show(
-            log,
-            "TinyLlama Log",
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Information);
+        if (_consoleForm is null)
+        {
+            _consoleForm = new ConsoleForm();
+            _consoleForm.FormClosed += (_, _) => _consoleForm = null;
+        }
+
+        if (_consoleForm.WindowState == FormWindowState.Minimized)
+            _consoleForm.WindowState = FormWindowState.Normal;
+
+        _consoleForm.BringToFront();
+        _consoleForm.Focus();
+        _consoleForm.Show();
     }
 
     static void Shutdown()
@@ -152,5 +159,67 @@ static class Program
         {
             try { _llamaProcess.Kill(); } catch { }
         }
+    }
+}
+
+sealed class ConsoleForm : Form
+{
+    private readonly TextBox _logTextBox;
+    private readonly System.Windows.Forms.Timer _refreshTimer;
+    private string _lastText = "";
+
+    public ConsoleForm()
+    {
+        Text = "TinyLlama Console";
+        Size = new Size(800, 500);
+        MinimumSize = new Size(600, 300);
+        StartPosition = FormStartPosition.CenterScreen;
+
+        _logTextBox = new TextBox
+        {
+            Dock = DockStyle.Fill,
+            Multiline = true,
+            ReadOnly = true,
+            ScrollBars = ScrollBars.Vertical,
+            Font = new Font("Consolas", 9f),
+            BackColor = Color.Black,
+            ForeColor = Color.LightGray,
+            WordWrap = false,
+            BorderStyle = BorderStyle.None,
+        };
+
+        _refreshTimer = new System.Windows.Forms.Timer { Interval = 500 };
+        _refreshTimer.Tick += (_, _) => RefreshLog();
+
+        Controls.Add(_logTextBox);
+        _refreshTimer.Start();
+    }
+
+    void RefreshLog()
+    {
+        var log = Program.GetLogText();
+        if (log != _lastText)
+        {
+            _lastText = log;
+            _logTextBox.BeginInvoke((Action)(() =>
+            {
+                _logTextBox.Text = log;
+                _logTextBox.SelectionStart = _logTextBox.Text.Length;
+                _logTextBox.ScrollToCaret();
+            }));
+        }
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        _refreshTimer.Stop();
+        base.OnFormClosing(e);
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _refreshTimer.Dispose();
+        _logTextBox.Dispose();
+        base.OnClosed(e);
     }
 }
