@@ -18,7 +18,7 @@ class Program
     // Loop wakes every few seconds so a newly started llama-server is detected quickly,
     // but in idle mode we only poke after roughly a minute so VRAM can be evicted.
     const int loopIntervalMs = 5000;
-    const int idleIntervalMs = 60000;
+    const int idleIntervalMs = 7500;
 
     [DllImport("dxgi.dll")]
     static extern int CreateDXGIFactory(ref Guid riid, out IntPtr ppFactory);
@@ -98,13 +98,21 @@ class Program
                 long ticks = view.ReadInt64(OffsetLastPokeTicks);
                 int mode = view.ReadInt32(OffsetMode);
                 string modeStr = mode == ModeActive ? "Active (llama-server running)" : "Idle";
-                string lastPoke = ticks > 0
-                    ? new DateTime(ticks, DateTimeKind.Utc).ToLocalTime().ToString("HH:mm:ss")
-                    : "never";
+                string lastPokeAgo;
+                if (ticks > 0)
+                {
+                    var elapsed = DateTime.UtcNow.Ticks - ticks;
+                    var secondsAgo = Math.Max(0, (long)(elapsed / TimeSpan.TicksPerSecond));
+                    lastPokeAgo = $"poked {secondsAgo} seconds ago";
+                }
+                else
+                {
+                    lastPokeAgo = "never poked";
+                }
                 message =
                     $"Another HeadlessGPUKeeper is already running.\n\n" +
                     $"Mode: {modeStr}\n" +
-                    $"Last GPU poke: {lastPoke}";
+                    $"Last GPU poke: {lastPokeAgo}";
             }
         }
         catch { /* stale or not-yet-created shared state; fall through */ }
