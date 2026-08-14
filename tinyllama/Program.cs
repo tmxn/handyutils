@@ -62,10 +62,11 @@ static class Program
 
     static void StartLlama()
     {
+        var (exe, args) = ResolveLlamafilePath();
         var psi = new ProcessStartInfo
         {
-            FileName = ResolveLlamafilePath(),
-            Arguments = "--server --host 0.0.0.0 --jinja --ctx-size 1024 --port 8081",
+            FileName = exe,
+            Arguments = args,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -98,7 +99,7 @@ static class Program
         _llamaProcess.BeginErrorReadLine();
     }
 
-    static string ResolveLlamafilePath()
+    static (string exe, string args) ResolveLlamafilePath()
     {
         var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppDomain.CurrentDomain.BaseDirectory;
         var configPath = Path.Combine(exeDir, ConfigFileName);
@@ -108,17 +109,33 @@ static class Program
 
         if (File.Exists(configPath))
         {
-            var path = File.ReadAllText(configPath).Trim();
-            AddLogLine("*** Read path: [" + path + "]");
-            AddLogLine("*** Path exists: " + File.Exists(path));
-            if (!string.IsNullOrEmpty(path) && File.Exists(path))
+            var commandLine = File.ReadAllText(configPath).Trim();
+            AddLogLine("*** Command line: [" + commandLine + "]");
+            if (!string.IsNullOrEmpty(commandLine))
             {
-                AddLogLine("*** Using config path: " + path);
-                return path;
+                var (exe, args) = ParseCommandLine(commandLine);
+                AddLogLine("*** Using exe: " + exe);
+                AddLogLine("*** Using args: " + args);
+                return (exe, args);
             }
         }
         AddLogLine("*** Falling back to default: " + DefaultLlamafilePath);
-        return DefaultLlamafilePath;
+        return (DefaultLlamafilePath, "--server --host 0.0.0.0 --jinja --ctx-size 1024 --port 8081");
+    }
+
+    static (string exe, string args) ParseCommandLine(string commandLine)
+    {
+        commandLine = commandLine.Trim();
+        if (commandLine.StartsWith("\""))
+        {
+            var endQuote = commandLine.IndexOf('"', 1);
+            if (endQuote > 0)
+                return (commandLine[1..endQuote], commandLine[(endQuote + 1)..].Trim());
+        }
+        var spaceIndex = commandLine.IndexOf(' ');
+        if (spaceIndex > 0)
+            return (commandLine[..spaceIndex], commandLine[(spaceIndex + 1)..].Trim());
+        return (commandLine, "");
     }
 
     static void AddLogLine(string line)
