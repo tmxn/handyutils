@@ -19,6 +19,8 @@ public sealed class KeeperCore
 
     const int loopIntervalMs = 5000;
     const int idleIntervalMs = 7500;
+    const int processCheckIntervalMs = 5000;
+    const int adapterRetryMs = 1000;
 
     const int StateSize = 16;
     const int OffsetMagic = 0;
@@ -63,11 +65,15 @@ public sealed class KeeperCore
     }
 
     readonly StateFile _state = new();
-    readonly IntPtr _targetAdapter;
+    IntPtr _targetAdapter;
     long _lastPokeTicks;
+    bool _llamaRunning;
+    long _lastProcessCheckTicks;
+    long _lastAdapterSearchTicks;
 
     public KeeperCore()
     {
+        _lastAdapterSearchTicks = DateTime.UtcNow.Ticks;
         _targetAdapter = FindTargetAdapter();
     }
 
@@ -78,8 +84,17 @@ public sealed class KeeperCore
     /// </summary>
     public int Tick()
     {
-        bool active = LlamaServerRunning();
         long now = DateTime.UtcNow.Ticks;
+        bool active = LlamaServerRunning(now);
+
+        if (_targetAdapter == IntPtr.Zero &&
+            now - _lastAdapterSearchTicks >= adapterRetryMs * TimeSpan.TicksPerMillisecond)
+        {
+            // The target GPU may not have been enumerable yet (driver still
+            // initializing, adapter description not present). Retry briefly.
+            _lastAdapterSearchTicks = now;
+            _targetAdapter = FindTargetAdapter();
+        }
 
         if (_targetAdapter != IntPtr.Zero)
         {
@@ -165,7 +180,23 @@ public sealed class KeeperCore
         }
     }
 
-    static bool LlamaServerRunning()
+    /// <summary>
+    /// Returns whether llama-server is running, re-checking the process table at most
+    /// once per processCheckIntervalMs. The keep-alive cadence (5s) and the UI linger
+    /// (10s) make a coarser detection interval indistinguishable in practice, and it
+    /// avoids a full process-table snapshot every UI tick.
+    /// </summary>
+    bool LlamaServerRunning(long now)
+    {
+        if (now - _lastProcessCheckTicks < processCheckIntervalMs * TimeSpan.TicksPerMillisecond)
+            return _llamaRunning;
+
+        _lastProcessCheckTicks = now;
+        _llamaRunning = CheckLlamaServer();
+        return _llamaRunning;
+    }
+
+    static bool CheckLlamaServer()
     {
         Process[] processes;
         try { processes = Process.GetProcessesByName("llama-server"); }

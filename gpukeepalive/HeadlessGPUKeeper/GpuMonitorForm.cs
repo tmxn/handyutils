@@ -226,8 +226,9 @@ public sealed class GpuMonitorForm : Form
             _monitor?.Enable();
             Show();
             SetWindowPos(Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
-            _vramLabel.Text = FormatVram(_monitor?.VramMb ?? 0);
-            _loadBar.Value = (int)Math.Round(_monitor?.LoadPercent ?? 0);
+            var (vramMb, loadPercent) = _monitor?.Sample() ?? (0, 0);
+            _vramLabel.Text = FormatVram(vramMb);
+            _loadBar.Value = (int)Math.Round(loadPercent);
         }
         else
         {
