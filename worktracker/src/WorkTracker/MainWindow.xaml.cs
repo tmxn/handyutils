@@ -33,6 +33,7 @@ public partial class MainWindow : Window
     public MainWindow(AppConfig config)
     {
         InitializeComponent();
+        SourceInitialized += (_, _) => ApplyWindowChrome();
         Theme.Changed += OnThemeChanged;
         _config = config;
         _configStore = new ConfigStore();
@@ -320,8 +321,20 @@ public partial class MainWindow : Window
     {
         Dispatcher.BeginInvoke(() =>
         {
+            ApplyWindowChrome();
             if (_collection != null && _selectedDev != null) BuildGrid();
         });
+    }
+
+    /// <summary>
+    /// Win11: dark title bar + Mica backdrop (see Services/WindowChrome.cs).
+    /// When Mica is available the window background must be transparent so the
+    /// backdrop shows through; otherwise keep the solid theme color.
+    /// </summary>
+    private void ApplyWindowChrome()
+    {
+        var mica = WindowChrome.Apply(this, Theme.Current == "dark");
+        Background = mica ? Brushes.Transparent : Theme.Brush("WindowBackground");
     }
 
     private Brush FindBrush(string key)

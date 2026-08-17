@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using WorkTracker.Services;
 
 namespace WorkTracker;
@@ -14,6 +15,9 @@ public partial class SettingsWindow : Window
     public SettingsWindow(AppConfig config, List<(string Name, string Email)> unassigned)
     {
         InitializeComponent();
+        SourceInitialized += (_, _) => ApplyWindowChrome();
+        Theme.Changed += OnThemeChanged;
+        Closed += (_, _) => Theme.Changed -= OnThemeChanged;
         _config = config;
         _unassigned = unassigned;
 
@@ -46,6 +50,15 @@ public partial class SettingsWindow : Window
         foreach (var (name, email) in unassigned)
             UnassignedList.Items.Add(new ListBoxItem { Content = $"{name} <{email}>" });
     }
+
+    /// <summary>Win11: dark title bar + Mica backdrop (see Services/WindowChrome.cs).</summary>
+    private void ApplyWindowChrome()
+    {
+        var mica = WindowChrome.Apply(this, Theme.Current == "dark");
+        Background = mica ? Brushes.Transparent : Theme.Brush("WindowBackground");
+    }
+
+    private void OnThemeChanged() => Dispatcher.BeginInvoke(ApplyWindowChrome);
 
     private void DeveloperList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
