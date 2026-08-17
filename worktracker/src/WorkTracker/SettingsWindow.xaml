@@ -1,0 +1,110 @@
+<Window x:Class="WorkTracker.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="WorkTracker Settings" Height="700" Width="720"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource WindowBackground}" Foreground="{DynamicResource TextPrimary}">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="14">
+
+            <!-- Repository -->
+            <TextBlock Text="Repository" FontWeight="Bold" FontSize="13" Margin="0,4,0,6"/>
+            <TextBox x:Name="RepoPathBox" Padding="3" Margin="0,0,0,10"/>
+
+            <!-- LLM -->
+            <TextBlock Text="LLM command" FontWeight="Bold" FontSize="13" Margin="0,4,0,6"/>
+            <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="120"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="command:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <TextBox x:Name="LlmCommandBox" Grid.Column="1" Padding="3"/>
+                <TextBlock Grid.Column="2" Text="timeout (s):" VerticalAlignment="Center" Margin="12,0,8,0"/>
+                <TextBox x:Name="LlmTimeoutBox" Grid.Column="3" Padding="3"/>
+            </Grid>
+            <TextBlock Text="args (space-separated):" Margin="0,0,0,2"/>
+            <TextBox x:Name="LlmArgsBox" Padding="3" Margin="0,0,0,8"/>
+            <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="thinking effort (pi):" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <ComboBox x:Name="ThinkingCombo" Grid.Column="1" Width="110" Padding="3"/>
+                <TextBlock Grid.Column="2" Text="ignored for non-pi commands; leave any --thinking out of args above"
+                           VerticalAlignment="Center" Foreground="{DynamicResource TextMuted}" Margin="10,0,0,0" FontSize="11"/>
+            </Grid>
+
+            <!-- Load thresholds -->
+            <TextBlock Text="Grid load thresholds (5 cutoffs → 6 color steps)" FontWeight="Bold"
+                       FontSize="13" Margin="0,4,0,6"/>
+            <StackPanel x:Name="ThresholdsPanel" Orientation="Horizontal" Margin="0,0,0,10"/>
+
+            <!-- Developers -->
+            <TextBlock Text="Developers" FontWeight="Bold" FontSize="13" Margin="0,4,0,6"/>
+            <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="220"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <ListBox x:Name="DeveloperList" Height="120" SelectionChanged="DeveloperList_SelectionChanged"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                        <Button Content="Add" Padding="10,2" Margin="0,0,6,0" Click="AddDeveloper_Click"/>
+                        <Button Content="Remove" Padding="10,2" Click="RemoveDeveloper_Click"/>
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Margin="12,0,0,0">
+                    <TextBlock Text="Display name:" Margin="0,0,0,2"/>
+                    <TextBox x:Name="DisplayNameBox" Padding="3" Margin="0,0,0,8"/>
+                    <TextBlock Text="Author names (one per line, case-insensitive, exact or substring):"
+                               Margin="0,0,0,2"/>
+                    <TextBox x:Name="NamesBox" AcceptsReturn="True" Height="70" TextWrapping="Wrap"
+                             Padding="3" Margin="0,0,0,8"/>
+                    <TextBlock Text="Author emails (one per line):" Margin="0,0,0,2"/>
+                    <TextBox x:Name="EmailsBox" AcceptsReturn="True" Height="50" TextWrapping="Wrap"
+                             Padding="3" Margin="0,0,0,8"/>
+                    <TextBlock x:Name="NoDevSelected" Text="Select a developer to edit, or add a new one."
+                               Foreground="{DynamicResource TextMuted}"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- Unassigned authors -->
+            <TextBlock Text="Unassigned authors in current window" FontWeight="Bold" FontSize="13"
+                       Margin="0,4,0,6"/>
+            <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <ListBox x:Name="UnassignedList" Height="100"/>
+                <Button Grid.Column="1" Content="Add as new developer" VerticalAlignment="Bottom"
+                        Padding="10,4" Margin="10,0,0,0" Click="AddUnassigned_Click"/>
+            </Grid>
+
+            <!-- Appearance -->
+            <TextBlock Text="Appearance" FontWeight="Bold" FontSize="13" Margin="0,4,0,6"/>
+            <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="100"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="theme:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <ComboBox x:Name="ThemeCombo" Grid.Column="1" Width="100" SelectedIndex="0"/>
+                <TextBlock Grid.Column="2" Text="auto follows the Windows light/dark setting"
+                           VerticalAlignment="Center" Foreground="{DynamicResource TextMuted}"
+                           Margin="10,0,0,0" FontSize="11"/>
+            </Grid>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+                <Button Content="Save" Padding="16,5" Margin="0,0,8,0" IsDefault="True" Click="Save_Click"/>
+                <Button Content="Cancel" Padding="16,5" IsCancel="True"/>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</Window>

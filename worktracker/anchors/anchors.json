@@ -1,0 +1,24 @@
+{
+  "anchorVersion": 1,
+  "_comment": "PLACEHOLDER — Milestone 5 (anchor baking): replace the three diffs with real commits selected from the configured repo and reviewed with the user. Until then, scoring will run against synthetic exemplars and scores should be considered uncalibrated.",
+  "anchors": [
+    {
+      "id": "low",
+      "targetScore": 2,
+      "note": "Single-line config value change, no behavioral risk.",
+      "diff": "diff --git a/config/appsettings.Production.json b/config/appsettings.Production.json\nindex 1a2b3c4..5d6e7f8 100644\n--- a/config/appsettings.Production.json\n+++ b/config/appsettings.Production.json\n@@ -12,7 +12,7 @@\n   \"Logging\": {\n     \"LogLevel\": {\n       \"Default\": \"Information\",\n-      \"Microsoft.AspNetCore\": \"Warning\"\n+      \"Microsoft.AspNetCore\": \"Information\"\n     }\n   }\n }"
+    },
+    {
+      "id": "mid",
+      "targetScore": 5,
+      "note": "Feature work across a few files: a new endpoint with validation and a repository method, moderate domain understanding required.",
+      "diff": "diff --git a/src/Api/ExportsController.cs b/src/Api/ExportsController.cs\nindex 9f8e7d6..0a1b2c3 100644\n--- a/src/Api/ExportsController.cs\n+++ b/src/Api/ExportsController.cs\n@@ -22,6 +22,21 @@ public class ExportsController : ControllerBase\n         return Ok(result);\n     }\n \n+    [HttpPost(\"exports/orders\")]\n+    public async Task<ActionResult<ExportJob>> ExportOrders([FromBody] ExportOrdersRequest request, CancellationToken ct)\n+    {\n+        if (request.DateRange.Start > request.DateRange.End)\n+            return BadRequest(\"Start date must be before end date.\");\n+        if (request.DateRange.End > DateTime.UtcNow)\n+            return BadRequest(\"End date cannot be in the future.\");\n+\n+        var job = await _exportService.StartOrderExportAsync(request, ct);\n+        return Accepted($\"/exports/orders/{job.Id}\", job);\n+    }\n }\ndiff --git a/src/Data/OrdersRepository.cs b/src/Data/OrdersRepository.cs\nindex 1122334..5566778 100644\n--- a/src/Data/OrdersRepository.cs\n+++ b/src/Data/OrdersRepository.cs\n@@ -40,6 +40,17 @@ public sealed class OrdersRepository\n     }\n \n+    public async Task<IReadOnlyList<Order>> FindInRangeAsync(DateTime start, DateTime end, CancellationToken ct)\n+    {\n+        return await _db.Orders\n+            .Where(o => o.CreatedAt >= start && o.CreatedAt < end)\n+            .AsNoTracking()\n+            .ToListAsync(ct);\n+    }\n+}\ndiff --git a/src/Api/Exports/ExportOrdersRequest.cs b/src/Api/Exports/ExportOrdersRequest.cs\nnew file mode 100644\nindex 0000000..abc1234\n--- /dev/null\n+++ b/src/Api/Exports/ExportOrdersRequest.cs\n@@ -0,0 +1,8 @@\n+namespace Api.Exports;\n+\n+public sealed record ExportOrdersRequest\n+{\n+    public required DateOnly Start { get; init; }\n+    public required DateOnly End { get; init; }\n+    public string? CustomerId { get; init; }\n+}"
+    },
+    {
+      "id": "high",
+      "targetScore": 9,
+      "note": "Subtle concurrency fix: reorders lock acquisition and reworks retry state machine to eliminate a deadlock; small diff, high diagnostic effort.",
+      "diff": "diff --git a/src/Workers/DispatchWorker.cs b/src/Workers/DispatchWorker.cs\nindex a1b2c3d..e4f5a6b 100644\n--- a/src/Workers/DispatchWorker.cs\n+++ b/src/Workers/DispatchWorker.cs\n@@ -87,19 +87,24 @@ public sealed class DispatchWorker : BackgroundService\n         while (!stoppingToken.IsCancellationRequested)\n         {\n-            lock (_globalGate)\n+            // The old code held _globalGate while awaiting ResumeQueue, which\n+            // deadlocked when a queue's resume callback re-queued an item and\n+            // tried to take the same gate. The gate now only serializes the\n+            // snapshot swap; per-queue state stays under its own lock.\n+            QueueSnapshot snapshot;\n+            lock (_globalGate)\n             {\n-                foreach (var queue in _queues.ToArray())\n-                {\n-                    var item = queue.TryDequeue();\n-                    if (item is null) continue;\n-                    await ResumeQueue(queue, item, stoppingToken);\n-                }\n+                snapshot = _snapshot;\n+            }\n+\n+            foreach (var queue in snapshot.Queues)\n+            {\n+                var item = queue.TryDequeue();\n+                if (item is null) continue;\n+                await queue.ResumeAsync(item, stoppingToken);\n+            }\n         }\n     }"
+    }
+  ]
+}

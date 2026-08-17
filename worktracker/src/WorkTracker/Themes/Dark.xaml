@@ -1,0 +1,30 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- Dark theme palette (GitHub-dark inspired) -->
+    <SolidColorBrush x:Key="WindowBackground" Color="#0D1117"/>
+    <SolidColorBrush x:Key="ToolbarBackground" Color="#161B22"/>
+    <SolidColorBrush x:Key="PanelBorderBrush" Color="#30363D"/>
+    <SolidColorBrush x:Key="RowBorderBrush" Color="#21262D"/>
+    <SolidColorBrush x:Key="TextPrimary" Color="#E6EDF3"/>
+    <SolidColorBrush x:Key="TextMuted" Color="#8B949E"/>
+    <SolidColorBrush x:Key="LinkBrush" Color="#58A6FF"/>
+    <SolidColorBrush x:Key="MergeBackground" Color="#161B22"/>
+    <SolidColorBrush x:Key="UnscoredBase" Color="#22272E"/>
+    <SolidColorBrush x:Key="UnscoredLines" Color="#3D444D"/>
+
+    <!-- Control chrome -->
+    <SolidColorBrush x:Key="ControlBackground" Color="#21262D"/>
+    <SolidColorBrush x:Key="ControlHover" Color="#30363D"/>
+    <SolidColorBrush x:Key="ControlPressed" Color="#3D444D"/>
+    <SolidColorBrush x:Key="ControlBorder" Color="#30363D"/>
+    <SolidColorBrush x:Key="InputBackground" Color="#161B22"/>
+    <SolidColorBrush x:Key="InputBorder" Color="#30363D"/>
+    <SolidColorBrush x:Key="SelectionBackground" Color="#1F6FEB"/>
+    <SolidColorBrush x:Key="SelectionForeground" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="MenuHover" Color="#30363D"/>
+    <SolidColorBrush x:Key="ScrollbarTrack" Color="#0D1117"/>
+    <SolidColorBrush x:Key="ScrollbarThumb" Color="#484F58"/>
+    <SolidColorBrush x:Key="ScrollbarThumbHover" Color="#6E7681"/>
+    <SolidColorBrush x:Key="ToolTipBackground" Color="#161B22"/>
+    <SolidColorBrush x:Key="ToolTipBorder" Color="#30363D"/>
+</ResourceDictionary>

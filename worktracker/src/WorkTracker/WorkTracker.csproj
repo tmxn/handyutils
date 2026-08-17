@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>WorkTracker</AssemblyName>
+    <RootNamespace>WorkTracker</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Baked calibration anchors ship next to the executable and are also
+         found by walking up from the exe (developer checkouts). -->
+    <None Include="..\..\anchors\anchors.json" Link="anchors\anchors.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

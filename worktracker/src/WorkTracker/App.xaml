@@ -1,0 +1,38 @@
+<Application x:Class="WorkTracker.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnMainWindowClose">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- Theme brushes (Light/Dark) — swapped live by Services/Theme.cs (must stay index 0) -->
+                <ResourceDictionary Source="Themes/Light.xaml"/>
+                <!-- Implicit control styles that follow the theme -->
+                <ResourceDictionary Source="Themes/Controls.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- GitHub-style green ramp for the load scale (steps 0..5; 5 = very high, load >= 35) -->
+            <SolidColorBrush x:Key="Load0" Color="#E1E4E8"/>
+            <SolidColorBrush x:Key="Load1" Color="#9BE9A8"/>
+            <SolidColorBrush x:Key="Load2" Color="#40C463"/>
+            <SolidColorBrush x:Key="Load3" Color="#30A14E"/>
+            <SolidColorBrush x:Key="Load4" Color="#216E39"/>
+            <SolidColorBrush x:Key="Load5" Color="#1A5532"/>
+
+            <!-- Neutral hatch for cells with only unscored commits (colors follow the theme) -->
+            <DrawingBrush x:Key="UnscoredBrush" TileMode="Tile"
+                          Viewport="0,0,8,8" ViewportUnits="Absolute" Stretch="None">
+                <DrawingBrush.Drawing>
+                    <DrawingGroup>
+                        <GeometryDrawing Brush="{DynamicResource UnscoredBase}"><GeometryDrawing.Geometry>
+                            <RectangleGeometry Rect="0,0,8,8"/></GeometryDrawing.Geometry>
+                        </GeometryDrawing>
+                        <GeometryDrawing Brush="{DynamicResource UnscoredLines}"><GeometryDrawing.Geometry>
+                            <PathGeometry Figures="M -2,10 L 10,-2 M 2,10 L 10,2"/></GeometryDrawing.Geometry>
+                        </GeometryDrawing>
+                    </DrawingGroup>
+                </DrawingBrush.Drawing>
+            </DrawingBrush>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

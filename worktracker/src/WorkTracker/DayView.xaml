@@ -1,0 +1,47 @@
+<UserControl x:Class="WorkTracker.DayView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:wt="clr-namespace:WorkTracker">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                  Foreground="{DynamicResource TextPrimary}">
+        <StackPanel Margin="12">
+            <TextBlock x:Name="TitleText" FontWeight="Bold" FontSize="17" Margin="0,0,0,4"/>
+            <TextBlock x:Name="SubtitleText" Foreground="{DynamicResource TextMuted}" FontSize="13" Margin="0,0,0,10"/>
+            <ItemsControl x:Name="CommitItems">
+                <ItemsControl.Resources>
+                    <DataTemplate DataType="{x:Type wt:CommitRow}">
+                        <Border BorderBrush="{DynamicResource RowBorderBrush}" BorderThickness="0,0,0,1" Padding="6,8"
+                                Background="{Binding MergeBackground}">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                <Border Background="{Binding ScoreBadgeBrush}" CornerRadius="3" Padding="4,1"
+                                        Visibility="{Binding ScoreBadgeVisibility}">
+                                    <TextBlock Text="{Binding ScoreText}" Foreground="White" FontWeight="Bold"/>
+                                </Border>
+                                <TextBlock Text="{Binding TimeText}" Foreground="{DynamicResource TextMuted}"
+                                           Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding MergeTag}" Foreground="{DynamicResource TextMuted}"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding TriageTag}" Foreground="{DynamicResource TextMuted}"
+                                           VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <wt:SelectableTextBox Text="{Binding Subject, Mode=OneWay}"
+                                                      FontWeight="SemiBold" FontSize="14" Margin="0,4,0,0"
+                                                      Foreground="{Binding SubjectForeground}"/>
+                                <wt:SelectableTextBox Text="{Binding CommentText, Mode=OneWay}"
+                                                      FontSize="13" Foreground="{DynamicResource TextMuted}" Margin="0,2,0,0"/>
+                                <wt:SelectableTextBox Text="{Binding StatText, Mode=OneWay}"
+                                                      Foreground="{DynamicResource TextMuted}" FontSize="12" Margin="0,2,0,0"/>
+                                <Expander Header="diff" Margin="0,4,0,0"
+                                          Visibility="{Binding DiffVisibility}">
+                                    <wt:SelectableTextBox Text="{Binding DiffText, Mode=OneWay}"
+                                                          FontFamily="Consolas" FontSize="11" Margin="4,0,0,0"/>
+                                </Expander>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.Resources>
+            </ItemsControl>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
