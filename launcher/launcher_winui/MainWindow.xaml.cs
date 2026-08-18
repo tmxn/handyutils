@@ -232,7 +232,7 @@ public sealed partial class MainWindow : Window
             button.Click += (_, _) =>
             {
                 Execute(item.Path, item.Args);
-                Application.Current.Exit();
+                HideWindow(); // the process stays resident in the tray
             };
 
             Grid.SetRow(button, row);
@@ -423,23 +423,36 @@ public sealed partial class MainWindow : Window
         if (e.Key == Windows.System.VirtualKey.Escape)
         {
             e.Handled = true;
-            Application.Current.Exit();
+            HideWindow();
         }
     }
 
-    // Cold-start contract, like the WinForms version: the window is a popup —
-    // as soon as focus leaves it, the process exits.
+    // The window is a popup — as soon as focus leaves it, it hides. The
+    // process itself stays resident in the tray; only the tray menu's
+    // "Exit" (or killing the process) ends the app.
     private void OnActivated(object sender, WindowActivatedEventArgs e)
     {
         if (e.WindowActivationState == WindowActivationState.Deactivated && _armed)
         {
-            AppWindow.Hide();
-            Application.Current.Exit();
+            HideWindow();
         }
     }
 
-    private void ShowAtCursor()
+    private void HideWindow()
     {
+        AppWindow.Hide();
+    }
+
+    /// <summary>
+    /// Bring the launcher up at the cursor, called from the tray icon
+    /// (left click) and from other instances / quicklauncher via the show
+    /// event. The window was created once at startup and only hidden since.
+    /// </summary>
+    public void ShowAtCursor()
+    {
+        // No-op when already visible; required when re-showing a hidden window.
+        AppWindow.Show();
+
         if (!Native.GetCursorPos(out Native.Point cursor))
             return;
 
@@ -465,12 +478,37 @@ public sealed partial class MainWindow : Window
             MoveHwnd(x, y, $"cursor=({cursor.X},{cursor.Y})", "post-show"));
     }
 
+    // ------------------------------------------------------------------ tray
+
+    /// <summary>Re-read ~/.launcher/config.json and rebuild the whole UI.</summary>
+    public void ReloadConfig()
+    {
+        int keep = _selectedIndex;
+        _categories.Clear();
+        LoadConfig();
+        BuildCategoryButtons();
+
+        int index = keep < _categories.Count ? keep : (_categories.Count > 0 ? 0 : -1);
+        _selectedIndex = -1; // force SelectCategory to actually rebuild
+        if (index >= 0)
+            SelectCategory(index);
+
+        SizeWindowToContent();
+        App.Log($"config reloaded: {_categories.Count} categories");
+    }
+
     private void MoveHwnd(int x, int y, string context, string tag)
     {
         IntPtr hwnd = WindowNative.GetWindowHandle(this);
         if (hwnd == IntPtr.Zero) return;
 
-        Native.MoveWindow(hwnd, x, y);
+        // BringToFrontAndMove + BringToForeground, not the plain SWP_NOZORDER
+        // move: re-showing from the tray / a quicklauncher show-event must
+        // land the window on top AND with input focus, otherwise it appears
+        // behind the current foreground window and the deactivation auto-hide
+        // never fires either (it was never active to begin with).
+        Native.BringToFrontAndMove(hwnd, x, y);
+        Native.BringToForeground(hwnd);
 
         // Read the position back so the log proves where the window actually
         // ended up (this is what was unverifiable with AppWindow.Move).

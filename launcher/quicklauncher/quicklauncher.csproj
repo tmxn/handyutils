@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <RootNamespace>QuickLauncher</RootNamespace>
+    <AssemblyName>quicklauncher</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+
+    <!-- No WinUI, no Windows App SDK, no WinForms: this stub only needs
+         System.Private.CoreLib + the AOT compiler. The whole point is a
+         tiny exe that cold-starts in ~10ms to open the main launcher. -->
+
+    <!-- Land in the exact folder where the main launcher's build output lives
+         (bin/<Configuration>/<tfm>/win-x64), next to launcher_winui.exe.
+         Publish with the same -c as the main app's build. -->
+    <PublishDir>..\launcher_winui\bin\$(Configuration)\net9.0-windows10.0.19041.0\win-x64\</PublishDir>
+
+    <ApplicationIcon>..\launcher_winui\Powershell.ico</ApplicationIcon>
+
+    <!-- Native AOT: one small self-contained exe, no managed payload.
+         Only affects the publish target; dotnet build still emits IL. -->
+    <PublishAot>true</PublishAot>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
+</Project>

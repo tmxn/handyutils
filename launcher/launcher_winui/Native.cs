@@ -98,6 +98,9 @@ internal static partial class Native
     private const uint SWP_NOMOVE = 0x0002;
     private const uint SWP_NOSIZE = 0x0001;
     private const uint SWP_NOZORDER = 0x0004;
+    private const uint SWP_SHOWWINDOW = 0x0040;
+    private static readonly IntPtr HWND_TOP = new(-1);
+    private const uint ASFW_ANY = 0xFFFFFFFF;
 
     [LibraryImport("user32.dll", EntryPoint = "GetWindowLongW")]
     private static partial int GetWindowLong(IntPtr hwnd, int index);
@@ -131,5 +134,33 @@ internal static partial class Native
         SetWindowLong(hwnd, GWL_STYLE, style);
         SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0,
             SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
+    }
+
+    /// <summary>Move and place above every other window (HWND_TOP, no
+    /// SWP_NOZORDER) and activate it. Unlike MoveWindow, this is what
+    /// re-showing a hidden window needs: AppWindow.Show() alone leaves the
+    /// window behind the current foreground window.</summary>
+    public static void BringToFrontAndMove(IntPtr hwnd, int x, int y)
+    {
+        SetWindowPos(hwnd, HWND_TOP, x, y, 0, 0, SWP_NOSIZE | SWP_SHOWWINDOW);
+    }
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool AllowSetForegroundWindow(uint dwProcessId);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetForegroundWindow(IntPtr hWnd);
+
+    /// <summary>Give the window real input focus. The show can be requested
+    /// by another process (quicklauncher) while we are in the background, in
+    /// which case the normal SetForegroundWindow restriction would keep the
+    /// window unfocused and hidden-behind; AllowSetForegroundWindow(ASFW_ANY)
+    /// lifts that restriction for our own call.</summary>
+    public static void BringToForeground(IntPtr hwnd)
+    {
+        AllowSetForegroundWindow(ASFW_ANY);
+        SetForegroundWindow(hwnd);
     }
 }

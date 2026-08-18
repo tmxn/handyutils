@@ -14,6 +14,9 @@
     <!-- Unpackaged app: no MSIX, no store identity. -->
     <WindowsPackageType>None</WindowsPackageType>
 
+    <!-- Powershell.ico doubles as the tray icon (loaded from the output dir). -->
+    <ApplicationIcon>Powershell.ico</ApplicationIcon>
+
     <!-- Bundle the .NET runtime + Windows App SDK runtime with the app so it
          runs without any globally installed runtime (same story as the AOT
          publish of the original launcher). -->
@@ -31,6 +34,15 @@
     <!-- Reuse the original launcher's AOT-friendly config model verbatim,
          so both apps read the exact same ~/.launcher/config.json schema. -->
     <Compile Include="..\launcher\ConfigModel.cs" Link="Shared\ConfigModel.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Tray icon source, copied next to the exe so TrayIcon can load it.
+         Also set as the exe icon via <ApplicationIcon> above. -->
+    <Content Include="Powershell.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>Powershell.ico</Link>
+    </Content>
   </ItemGroup>
 
 </Project>
