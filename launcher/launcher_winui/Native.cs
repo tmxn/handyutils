@@ -91,6 +91,8 @@ internal static partial class Native
     }
 
     private const int GWL_STYLE = -16;
+    private const int GWL_EXSTYLE = -20;
+    private const int WS_EX_TOOLWINDOW = 0x00000080;
     private const int WS_POPUP = unchecked((int)0x80000000);
     private const int WS_OVERLAPPEDWINDOW = 0x00CF0000;
     private const uint SWP_FRAMECHANGED = 0x0020;
@@ -132,6 +134,19 @@ internal static partial class Native
         int style = GetWindowLong(hwnd, GWL_STYLE);
         style = (style & ~WS_OVERLAPPEDWINDOW) | WS_POPUP;
         SetWindowLong(hwnd, GWL_STYLE, style);
+        SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0,
+            SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
+    }
+
+    /// <summary>Suppress the taskbar button. WinUI 3 creates its top-level
+    /// window with WS_EX_APPWINDOW, so even a borderless popup still gets a
+    /// taskbar entry; WS_EX_TOOLWINDOW overrides that. The window is a
+    /// transient popup re-shown from the tray, so it should never appear in
+    /// the taskbar at all.</summary>
+    public static void HideFromTaskbar(IntPtr hwnd)
+    {
+        int exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
+        SetWindowLong(hwnd, GWL_EXSTYLE, exStyle | WS_EX_TOOLWINDOW);
         SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0,
             SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
     }

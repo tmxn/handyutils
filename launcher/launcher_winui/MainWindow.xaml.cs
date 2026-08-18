@@ -378,6 +378,7 @@ public sealed partial class MainWindow : Window
             // Borderless + native Win11 rounded corners; the DWM call is the
             // same corner preference the old GlassInterop set (Win10 fallback).
             Native.MakeBorderless(hwnd);
+            Native.HideFromTaskbar(hwnd);
             Native.RoundCorners(hwnd);
         }
 
