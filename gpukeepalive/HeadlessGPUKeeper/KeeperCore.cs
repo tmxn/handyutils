@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
 
@@ -19,7 +18,7 @@ public sealed class KeeperCore
 
     const int loopIntervalMs = 5000;
     const int idleIntervalMs = 7500;
-    const int processCheckIntervalMs = 5000;
+    const int processCheckIntervalMs = 1000;
     const int adapterRetryMs = 1000;
 
     const int StateSize = 16;
@@ -27,8 +26,39 @@ public sealed class KeeperCore
     const int OffsetLastPokeTicks = 4;
     const int OffsetMode = 12;
 
+    const uint TH32CS_SNAPPROCESS = 0x00000002;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern bool Process32First(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern bool Process32Next(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool CloseHandle(IntPtr hObject);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct PROCESSENTRY32
+    {
+        public uint dwSize;
+        public uint cntUsage;
+        public uint th32ProcessID;
+        public IntPtr th32DefaultHeapID;
+        public uint th32ModuleID;
+        public uint cntThreads;
+        public uint th32ParentProcessID;
+        public int pcPriClassBase;
+        public uint dwFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+        public string szExeFile;
+    }
+
     [DllImport("dxgi.dll")]
     static extern int CreateDXGIFactory(ref Guid riid, out IntPtr ppFactory);
+
 
     [DllImport("d3d11.dll")]
     static extern int D3D11CreateDevice(IntPtr pAdapter, int driverType, IntPtr software, uint flags, IntPtr pFeatureLevels, uint featureLevels, uint sdkVersion, out IntPtr ppDevice, out int pFeatureLevel, out IntPtr ppImmediateContext);
@@ -182,9 +212,8 @@ public sealed class KeeperCore
 
     /// <summary>
     /// Returns whether llama-server is running, re-checking the process table at most
-    /// once per processCheckIntervalMs. The keep-alive cadence (5s) and the UI linger
-    /// (10s) make a coarser detection interval indistinguishable in practice, and it
-    /// avoids a full process-table snapshot every UI tick.
+    /// once per processCheckIntervalMs. The check is allocation-free (toolhelp32 snapshot),
+    /// so it runs on the UI thread at 1 s intervals without GC pressure.
     /// </summary>
     bool LlamaServerRunning(long now)
     {
@@ -198,12 +227,27 @@ public sealed class KeeperCore
 
     static bool CheckLlamaServer()
     {
-        Process[] processes;
-        try { processes = Process.GetProcessesByName("llama-server"); }
-        catch { return false; }
-        bool running = processes.Length > 0;
-        foreach (var p in processes) p.Dispose();
-        return running;
+        IntPtr snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snapshot == IntPtr.Zero) return false;
+
+        try
+        {
+            var entry = new PROCESSENTRY32 { dwSize = (uint)Marshal.SizeOf<PROCESSENTRY32>() };
+            if (!Process32First(snapshot, ref entry)) return false;
+
+            do
+            {
+                if (entry.szExeFile.Equals("llama-server.exe", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            while (Process32Next(snapshot, ref entry));
+
+            return false;
+        }
+        finally
+        {
+            CloseHandle(snapshot);
+        }
     }
 
     sealed class StateFile : IDisposable
