@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
+    <RootNamespace>LauncherWinUI</RootNamespace>
+    <AssemblyName>launcher_winui</AssemblyName>
+    <UseWinUI>true</UseWinUI>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- Unpackaged app: no MSIX, no store identity. -->
+    <WindowsPackageType>None</WindowsPackageType>
+
+    <!-- Bundle the .NET runtime + Windows App SDK runtime with the app so it
+         runs without any globally installed runtime (same story as the AOT
+         publish of the original launcher). -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260804001" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4654" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Reuse the original launcher's AOT-friendly config model verbatim,
+         so both apps read the exact same ~/.launcher/config.json schema. -->
+    <Compile Include="..\launcher\ConfigModel.cs" Link="Shared\ConfigModel.cs" />
+  </ItemGroup>
+
+</Project>

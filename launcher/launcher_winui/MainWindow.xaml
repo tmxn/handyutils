@@ -1,0 +1,10 @@
+<Window
+    x:Class="LauncherWinUI.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="Launcher">
+    <!-- The toolchain's XAML compiler here only accepts a very small subset of
+         members (Window.Title, plain Grid), so the whole UI is constructed in
+         code-behind where the full WinUI API is available via csc. -->
+    <Grid x:Name="Root"/>
+</Window>
