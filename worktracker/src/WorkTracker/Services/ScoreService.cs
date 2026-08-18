@@ -11,7 +11,7 @@ namespace WorkTracker.Services;
 /// </summary>
 public sealed class ScoreService
 {
-    public const int PromptVersion = 5;
+    public const int PromptVersion = 6;
     public const int MaxCommitsPerBatch = 15;
 
     // Diff triage: commits this large get a cheap pre-check (file list + short diff
@@ -75,11 +75,12 @@ public sealed class ScoreService
         List<CommitInfo> sameDayContext,
         AnchorSet anchors,
         Action<string>? status = null,
+        Action<string>? output = null,
         CancellationToken ct = default)
     {
         if (commits.Count == 0) return BatchResult.Empty();
 
-        var mechanical = await TriageLargeCommitsAsync(commits, status, ct);
+        var mechanical = await TriageLargeCommitsAsync(commits, status, output, ct);
         var prompt = BuildPrompt(commits, sameDayContext, anchors, mechanical);
         AppLog.Info($"scoring batch: {commits.Count} commit(s), {mechanical.Count} triaged mechanical, " +
                     $"prompt {prompt.Length} chars");
@@ -89,7 +90,7 @@ public sealed class ScoreService
         for (var attempt = 0; attempt < 2; attempt++)
         {
             ct.ThrowIfCancellationRequested();
-            lastResult = await _llm.RunAsync(prompt, ct);
+            lastResult = await _llm.RunAsync(prompt, ct, output);
             if (lastResult.TimedOut)
                 throw new ScoreBatchFailedException(
                     $"LLM call timed out after {lastResult.Duration.TotalSeconds:F0}s.",
@@ -199,7 +200,7 @@ public sealed class ScoreService
     /// triage": full diffs go to the scoring call as usual. Triage never blocks scoring.
     /// </summary>
     private async Task<Dictionary<string, string>> TriageLargeCommitsAsync(
-        List<CommitInfo> commits, Action<string>? status, CancellationToken ct)
+        List<CommitInfo> commits, Action<string>? status, Action<string>? output, CancellationToken ct)
     {
         var empty = new Dictionary<string, string>(StringComparer.Ordinal);
         var candidates = commits.Where(c => NeedsTriage(c) && c.Diff != null).ToList();
@@ -211,7 +212,7 @@ public sealed class ScoreService
         status?.Invoke($"triaging {candidates.Count} large commit(s) (file list + diff sample only)…");
         try
         {
-            var result = await _llm.RunAsync(BuildTriagePrompt(candidates), ct);
+            var result = await _llm.RunAsync(BuildTriagePrompt(candidates), ct, output);
             if (result.TimedOut)
             {
                 AppLog.Warn("triage timed out — sending full diffs");
@@ -255,7 +256,7 @@ public sealed class ScoreService
             sb.AppendLine($"subject: {c.Subject}");
             if (!string.IsNullOrWhiteSpace(c.Body))
                 sb.AppendLine($"body: {c.Body}");
-            sb.AppendLine($"stat: {c.FilesChanged} files, +{c.Insertions}/-{c.Deletions}");
+            sb.AppendLine($"stat: {c.FilesChanged} files, added {c.Insertions} lines, removed {c.Deletions} lines");
             sb.AppendLine("changed files:");
             AppendFileList(sb, c, TriageFileListLines);
             sb.AppendLine("diff sample (beginning only):");
@@ -303,7 +304,7 @@ public sealed class ScoreService
         for (var i = 0; i < c.Numstat.Count && i < maxLines; i++)
         {
             var n = c.Numstat[i];
-            sb.AppendLine($"{n.File}  (+{n.Insertions}/-{n.Deletions})");
+            sb.AppendLine($"{n.File}  (added {n.Insertions} lines, removed {n.Deletions} lines)");
         }
         if (c.Numstat.Count > maxLines)
             sb.AppendLine($"[… {c.Numstat.Count - maxLines} more files]");
@@ -331,7 +332,7 @@ public sealed class ScoreService
         sb.AppendLine("- Reverts are real work: score the effort of the revert plus the diagnosis it implies, and note in the comment that it is a revert.");
         sb.AppendLine("- Some commits are marked [triaged as mechanical]: a pre-check judged the change mechanical (e.g., dependency bumps, generated code, bulk renames), so their full diff is withheld. Score only the work such a commit implies, using the file list and diff sample — mechanical work scores low.");
         sb.AppendLine("- Integers 1-10 only. When unsure, use the anchors to decide which side of a boundary the commit falls on.");
-        sb.AppendLine("- Give every commit a one-sentence comment: what it does, plus a difficulty note when notable (e.g., \"small diff but fixes a race condition\").");
+        sb.AppendLine("- Give every commit an informative 1-2 sentence daily summary grounded in the diff. Name the behavior, algorithm, bug, or user-visible change and mention important files or components when clear. Add a difficulty note when notable (e.g., \"small diff but fixes a race condition\"). Do not merely restate the subject or describe the line count.");
         sb.AppendLine("- Write all text in plain ASCII: straight quotes/apostrophes, no curly quotes, no decorative dashes or ellipses.");
         sb.AppendLine();
 
@@ -340,7 +341,7 @@ public sealed class ScoreService
             sb.AppendLine("CONTEXT — same developer, same day (for difficulty inference only, never as scale references):");
             foreach (var c in context)
             {
-                sb.AppendLine($"{c.Hash} | {c.Subject} | {c.FilesChanged} files, +{c.Insertions}/-{c.Deletions}");
+                sb.AppendLine($"{c.Hash} | {c.Subject} | {c.FilesChanged} files, added {c.Insertions} lines, removed {c.Deletions} lines");
             }
             sb.AppendLine();
         }
@@ -354,7 +355,7 @@ public sealed class ScoreService
             sb.AppendLine($"subject: {c.Subject}");
             if (!string.IsNullOrWhiteSpace(c.Body))
                 sb.AppendLine($"body: {c.Body}");
-            sb.AppendLine($"stat: {c.FilesChanged} files, +{c.Insertions}/-{c.Deletions}");
+            sb.AppendLine($"stat: {c.FilesChanged} files, added {c.Insertions} lines, removed {c.Deletions} lines");
             if (mechanical.TryGetValue(c.Hash, out var triageNote))
             {
                 sb.AppendLine("[triaged as mechanical — full diff withheld]");

@@ -62,7 +62,30 @@
             </Border>
 
             <Border Grid.Column="2" BorderBrush="{DynamicResource PanelBorderBrush}" BorderThickness="1" Background="{DynamicResource WindowBackground}">
-                <ContentControl x:Name="DetailHost"/>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <ContentControl x:Name="DetailHost"/>
+                    <Border x:Name="LlmOutputPanel" Grid.Row="1" Visibility="Collapsed"
+                            Background="{DynamicResource ToolbarBackground}"
+                            BorderBrush="{DynamicResource PanelBorderBrush}" BorderThickness="1"
+                            Padding="8" Margin="8,0,8,8">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="150"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock x:Name="LlmOutputTitle" Text="Live LLM output"
+                                       FontWeight="SemiBold" Foreground="{DynamicResource TextMuted}"
+                                       Margin="0,0,0,5"/>
+                            <TextBox x:Name="LlmOutputText" Grid.Row="1" Style="{StaticResource ReadOnlySelectable}"
+                                     FontFamily="Consolas" FontSize="11" VerticalScrollBarVisibility="Auto"
+                                     HorizontalScrollBarVisibility="Disabled" TextWrapping="Wrap"/>
+                        </Grid>
+                    </Border>
+                </Grid>
             </Border>
         </Grid>
     </DockPanel>

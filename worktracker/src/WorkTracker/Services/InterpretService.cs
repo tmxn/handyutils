@@ -9,7 +9,7 @@ namespace WorkTracker.Services;
 /// </summary>
 public sealed class InterpretService
 {
-    public const int PromptVersion = 5;
+    public const int PromptVersion = 6;
 
     private readonly LlmRunner _llm;
 
@@ -30,6 +30,7 @@ public sealed class InterpretService
         ScoreCache scores,
         bool forceRegenerate,
         Action<string>? status = null,
+        Action<string>? output = null,
         CancellationToken ct = default)
     {
         var weekStartStr = weekStart.ToString("yyyy-MM-dd");
@@ -53,7 +54,7 @@ public sealed class InterpretService
         var sw = System.Diagnostics.Stopwatch.StartNew();
         status?.Invoke("Generating week narrative (LLM call)…");
         var prompt = BuildPrompt(developerId, weekStart, weekCommits, allWindowCommits, scores);
-        var result = await _llm.RunAsync(prompt, ct);
+        var result = await _llm.RunAsync(prompt, ct, output);
         if (result.TimedOut)
             throw new InvalidOperationException($"LLM call timed out after {result.Duration.TotalSeconds:F0}s.");
         AppLog.Info($"week {weekStartStr} report generated in {sw.Elapsed.TotalSeconds:F0}s " +
@@ -148,7 +149,7 @@ public sealed class InterpretService
                 sb.AppendLine($"{c.Hash} | {c.AuthorDate:yyyy-MM-dd} | [merge] {c.Subject}");
                 continue;
             }
-            var line = $"{c.Hash} | {c.AuthorDate:yyyy-MM-dd} | {c.Subject} | +{c.Insertions}/-{c.Deletions}";
+            var line = $"{c.Hash} | {c.AuthorDate:yyyy-MM-dd} | {c.Subject} | added {c.Insertions} lines, removed {c.Deletions} lines";
             if (scores.Entries.TryGetValue(c.Hash, out var e))
                 line += $" | score {e.Score} | {e.Comment}";
             else

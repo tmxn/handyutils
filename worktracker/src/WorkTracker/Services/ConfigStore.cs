@@ -60,8 +60,14 @@ public sealed class ConfigStore
     private static AppConfig Normalize(AppConfig cfg)
     {
         cfg.Llm ??= new LlmSettings();
+        cfg.Llm.Backend = cfg.Llm.Backend?.Trim().ToLowerInvariant() == "llama.cpp"
+            ? "llama.cpp" : "pi";
         if (cfg.Llm.Args == null) cfg.Llm.Args = new List<string>();
         if (cfg.Llm.TimeoutSeconds <= 0) cfg.Llm.TimeoutSeconds = 600;
+        if (string.IsNullOrWhiteSpace(cfg.Llm.LlamaEndpoint))
+            cfg.Llm.LlamaEndpoint = "http://192.168.18.126:8080/";
+        if (string.IsNullOrWhiteSpace(cfg.Llm.LlamaModel)) cfg.Llm.LlamaModel = "any";
+        if (string.IsNullOrWhiteSpace(cfg.Llm.LlamaThinkingLevel)) cfg.Llm.LlamaThinkingLevel = "low";
         cfg.Grid ??= new GridSettings();
         if (cfg.Grid.LoadThresholds == null || cfg.Grid.LoadThresholds.Count != 5)
             cfg.Grid.LoadThresholds = new List<int> { 0, 1, 10, 20, 35 };

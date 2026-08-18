@@ -1,15 +1,20 @@
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
 
 namespace WorkTracker.Services;
 
 /// <summary>
-/// Spawns the configured external LLM command with the prompt on stdin and reads JSON from stdout.
-/// No authentication or model handling happens here — that is the user's CLI configuration.
+/// Calls the configured LLM backend. The original process-backed pi integration is
+/// retained, and llama.cpp uses its local OpenAI-compatible streaming endpoint.
 /// Every call is logged to the raw/ directory (last 20 kept).
 /// </summary>
 public sealed class LlmRunner
 {
+    private static readonly HttpClient Http = new() { Timeout = Timeout.InfiniteTimeSpan };
     private readonly LlmSettings _settings;
 
     public LlmRunner(LlmSettings settings)
@@ -20,6 +25,7 @@ public sealed class LlmRunner
     /// <summary>Resolves the command via PATH (Windows: also .cmd/.bat). Returns null if not found.</summary>
     public string? ResolveCommand()
     {
+        if (!IsPiBackend()) return null;
         var name = _settings.Command;
         if (string.IsNullOrWhiteSpace(name)) return null;
         // Already an absolute/relative path?
@@ -48,7 +54,25 @@ public sealed class LlmRunner
         return null;
     }
 
-    public async Task<LlmResult> RunAsync(string prompt, CancellationToken ct = default)
+    public bool IsReady() => IsPiBackend()
+        ? ResolveCommand() != null
+        : Uri.TryCreate(_settings.LlamaEndpoint, UriKind.Absolute, out var uri) &&
+          (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+    public async Task<LlmResult> RunAsync(string prompt, CancellationToken ct = default,
+        Action<string>? onOutput = null)
+    {
+        if (!IsPiBackend() && !IsReady())
+            throw new LlmResolveError(
+                $"llama.cpp endpoint '{_settings.LlamaEndpoint}' is not a valid absolute HTTP(S) URL. " +
+                "Fix the endpoint in Settings.");
+        return IsPiBackend()
+            ? await RunProcessAsync(prompt, ct, onOutput)
+            : await RunLlamaCppAsync(prompt, ct, onOutput);
+    }
+
+    private async Task<LlmResult> RunProcessAsync(string prompt, CancellationToken ct,
+        Action<string>? onOutput)
     {
         var resolved = ResolveCommand();
         if (resolved == null)
@@ -78,7 +102,7 @@ public sealed class LlmRunner
         await stdin.WriteAsync(prompt);
         stdin.Close();
 
-        var stdoutTask = p.StandardOutput.ReadToEndAsync();
+        var stdoutTask = ReadOutputAsync(p.StandardOutput, onOutput, ct);
         var stderrTask = p.StandardError.ReadToEndAsync();
 
         var timeout = TimeSpan.FromSeconds(_settings.TimeoutSeconds);
@@ -112,6 +136,213 @@ public sealed class LlmRunner
                     $"args={string.Join(' ', effectiveArgs)}");
         RawLog.Write(resolved, effectiveArgs, prompt, result);
         return result;
+    }
+
+    private async Task<LlmResult> RunLlamaCppAsync(string prompt, CancellationToken ct,
+        Action<string>? onOutput)
+    {
+        var endpoint = CompletionEndpoint(_settings.LlamaEndpoint);
+        var args = new List<string> { "POST", endpoint.ToString() };
+        var sw = Stopwatch.StartNew();
+        var output = new StringBuilder();
+        string stderr = "";
+        var timedOut = false;
+        var exitCode = 0;
+
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, _settings.TimeoutSeconds)));
+            var reasoning = ReasoningOptions(_settings.LlamaThinkingLevel);
+            var chatTemplateKwargs = new Dictionary<string, object>
+            {
+                ["enable_thinking"] = reasoning.EnableThinking,
+            };
+            var payload = new Dictionary<string, object>
+            {
+                ["model"] = string.IsNullOrWhiteSpace(_settings.LlamaModel) ? "any" : _settings.LlamaModel,
+                ["messages"] = new[] { new { role = "user", content = prompt } },
+                ["stream"] = true,
+                ["reasoning_budget"] = reasoning.Budget,
+                ["chat_template_kwargs"] = chatTemplateKwargs,
+            };
+            if (reasoning.Effort != null)
+            {
+                payload["reasoning_effort"] = reasoning.Effort;
+                chatTemplateKwargs["reasoning_effort"] = reasoning.Effort;
+            }
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = JsonContent.Create(payload),
+            };
+
+            using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead,
+                timeoutCts.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                stderr = $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}: " +
+                         await response.Content.ReadAsStringAsync(timeoutCts.Token);
+                exitCode = -1;
+            }
+            else
+            {
+                await ReadLlamaResponseAsync(response, output, onOutput, timeoutCts.Token);
+            }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            timedOut = true;
+            exitCode = -1;
+            stderr = $"llama.cpp request timed out after {_settings.TimeoutSeconds}s";
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            exitCode = -1;
+            stderr = ex.Message;
+        }
+
+        sw.Stop();
+        var result = new LlmResult
+        {
+            ExitCode = exitCode,
+            Stdout = output.ToString(),
+            Stderr = stderr,
+            TimedOut = timedOut,
+            Duration = sw.Elapsed,
+        };
+        AppLog.Info($"llm llama.cpp exit={result.ExitCode} " +
+                    $"{(timedOut ? "TIMED OUT " : "")}{result.Duration.TotalSeconds:F1}s " +
+                    $"prompt={prompt.Length}B stdout={result.Stdout.Length}B stderr={result.Stderr.Length}B " +
+                    $"endpoint={endpoint}");
+        RawLog.Write("llama.cpp " + endpoint, args, prompt, result);
+        return result;
+    }
+
+    private static async Task<string> ReadOutputAsync(StreamReader reader, Action<string>? onOutput,
+        CancellationToken ct)
+    {
+        var output = new StringBuilder();
+        var buffer = new char[2048];
+        while (true)
+        {
+            var count = await reader.ReadAsync(buffer.AsMemory(), ct);
+            if (count == 0) break;
+            var chunk = new string(buffer, 0, count);
+            output.Append(chunk);
+            try { onOutput?.Invoke(chunk); } catch { /* UI observers must not break the LLM read. */ }
+        }
+        return output.ToString();
+    }
+
+    private static async Task ReadLlamaResponseAsync(HttpResponseMessage response, StringBuilder output,
+        Action<string>? onOutput, CancellationToken ct)
+    {
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        using var reader = new StreamReader(stream);
+        var isSse = response.Content.Headers.ContentType?.MediaType?.Contains("event-stream",
+            StringComparison.OrdinalIgnoreCase) == true;
+
+        if (!isSse)
+        {
+            var json = await reader.ReadToEndAsync(ct);
+            using var doc = JsonDocument.Parse(json);
+            var choices = doc.RootElement.GetProperty("choices");
+            if (choices.GetArrayLength() == 0) return;
+            var choice = choices[0];
+            if (choice.TryGetProperty("message", out var message))
+            {
+                Notify(GetText(message, "reasoning_content"), onOutput);
+                Append(GetText(message, "content"), output, onOutput);
+            }
+            else
+            {
+                Append(GetText(choice, "text"), output, onOutput);
+            }
+            return;
+        }
+
+        while (await reader.ReadLineAsync(ct) is { } line)
+        {
+            if (!line.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) continue;
+            var data = line[5..].Trim();
+            if (data.Length == 0 || data == "[DONE]") continue;
+            try
+            {
+                var (thinking, text) = ExtractDeltaText(data);
+                Notify(thinking, onOutput);
+                Append(text, output, onOutput);
+            }
+            catch (JsonException)
+            {
+                // Ignore a malformed keep-alive/event rather than losing the rest
+                // of an otherwise usable stream.
+            }
+        }
+    }
+
+    private static (string Thinking, string Text) ExtractDeltaText(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var choices = doc.RootElement.GetProperty("choices");
+        if (choices.GetArrayLength() == 0) return ("", "");
+        var delta = choices[0].TryGetProperty("delta", out var d) ? d : choices[0];
+        // Some llama.cpp versions expose reasoning separately; include it in the
+        // raw/live stream so the user can see what the model is doing.
+        return (GetText(delta, "reasoning_content"),
+            GetText(delta, "content") + GetText(delta, "text"));
+    }
+
+    private static string GetText(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() ?? "" : "";
+
+    private static void Append(string text, StringBuilder output, Action<string>? onOutput)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        output.Append(text);
+        try { onOutput?.Invoke(text); } catch { /* UI observers must not break the stream. */ }
+    }
+
+    private static void Notify(string text, Action<string>? onOutput)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        try { onOutput?.Invoke(text); } catch { /* UI observers must not break the stream. */ }
+    }
+
+    private static (int Budget, string? Effort, bool EnableThinking) ReasoningOptions(string? configured)
+    {
+        return configured?.Trim().ToLowerInvariant() switch
+        {
+            "off" or "none" => (0, "none", false),
+            "medium" => (2048, "medium", true),
+            "high" => (8192, "high", true),
+            "max" => (-1, null, true),
+            // Keep older saved values meaningful while using the llama-server
+            // levels and exact budgets supported by the endpoint.
+            "xhigh" => (8192, "high", true),
+            "minimal" => (512, "low", true),
+            _ => (512, "low", true),
+        };
+    }
+
+    private bool IsPiBackend() =>
+        !string.Equals(_settings.Backend?.Trim(), "llama.cpp", StringComparison.OrdinalIgnoreCase);
+
+    private static Uri CompletionEndpoint(string configured)
+    {
+        if (!Uri.TryCreate(configured.Trim(), UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            throw new InvalidOperationException("llama.cpp endpoint must be an absolute http:// or https:// URL.");
+
+        var path = uri.AbsolutePath.TrimEnd('/');
+        if (path.EndsWith("/v1/chat/completions", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
+            return uri;
+        return new Uri(uri, path + "/v1/chat/completions");
     }
 
     /// <summary>

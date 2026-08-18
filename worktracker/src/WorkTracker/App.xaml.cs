@@ -30,7 +30,10 @@ public partial class App : Application
         ConfigStore.BootstrapDataDir();
         var config = new ConfigStore().Load();
         AppLog.Info($"config: repo='{config.RepoPath}', developers={config.Developers.Count}, " +
-                    $"llm={config.Llm.Command} {string.Join(' ', config.Llm.Args)} " +
+                    $"llm={config.Llm.Backend} " +
+                    (config.Llm.Backend == "pi"
+                        ? $"{config.Llm.Command} {string.Join(' ', config.Llm.Args)} "
+                        : $"{config.Llm.LlamaEndpoint} model={config.Llm.LlamaModel} ") +
                     $"timeout={config.Llm.TimeoutSeconds}s, thinking={config.Llm.ThinkingEffort}, " +
                     $"theme={config.Theme}");
 

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -29,6 +30,13 @@ public partial class MainWindow : Window
     private DateTime[] _weekStarts = Array.Empty<DateTime>();
     private bool _busy;
     private bool _initialized;
+    private int _llmOutputGeneration;
+    private readonly object _llmOutputLock = new();
+    private readonly StringBuilder _llmOutputBuffer = new();
+    private bool _llmOutputUpdatePending;
+
+    private const int MaxLiveOutputLines = 100;
+    private const int MaxLiveOutputChars = 32_000;
 
     public MainWindow(AppConfig config)
     {
@@ -362,7 +370,7 @@ public partial class MainWindow : Window
             var total = byDay.Sum(g => g.Count());
             if (total == 0)
             {
-                SetStatus($"{_collection.Commits.Count(c => _selectedDev!.Matches(c.AuthorName, c.AuthorEmail))} commits in window · all scored · {(LLMReady() ? "llm ready" : "llm command not found")}");
+                SetStatus($"{_collection.Commits.Count(c => _selectedDev!.Matches(c.AuthorName, c.AuthorEmail))} commits in window · all scored · {(LLMReady() ? "llm ready" : "llm backend not ready")}");
                 return;
             }
             AppLog.Info($"auto-scoring {total} unscored commit(s) for {_selectedDev.DisplayName} across {byDay.Count} day(s)");
@@ -395,55 +403,64 @@ public partial class MainWindow : Window
         }
     }
 
-    private bool LLMReady() => _llm?.ResolveCommand() != null;
+    private bool LLMReady() => _llm?.IsReady() == true;
 
     private async Task ScoreDayAsync(Developer dev, DateTime day, List<CommitInfo> unscored, bool stampHeader)
     {
         if (_scoreService == null || _anchors == null || _git == null) return;
 
-        // Fetch diffs for unscored commits (second pass, only what's needed) — off the UI thread.
-        await Task.Run(() =>
+        BeginLlmOutput($"LLM output: scoring {day:yyyy-MM-dd}");
+        try
         {
-            foreach (var c in unscored) _git.GetDiff(c);
-        });
-
-        var batches = Chunk(unscored, ScoreService.MaxCommitsPerBatch).ToList();
-        var sameDayContext = DevCommits()
-            .Where(c => c.AuthorDate.Date == day && _scores.Entries.ContainsKey(c.Hash) &&
-                        !unscored.Contains(c))
-            .ToList();
-
-        for (var i = 0; i < batches.Count; i++)
-        {
-            // Later batches receive the earlier batches' commit list as same-day context.
-            var context = sameDayContext.Concat(
-                batches.Take(i).SelectMany(b => b).Where(c => _scores.Entries.ContainsKey(c.Hash))).ToList();
-
-            try
+            // Fetch diffs for unscored commits (second pass, only what's needed) — off the UI thread.
+            await Task.Run(() =>
             {
-                var batch = batches[i];
-                var result = await _scoreService.ScoreBatchAsync(
-                    batch, context, _anchors,
-                    status: s => SetStatus($"{day:yyyy-MM-dd}: {s}"));
+                foreach (var c in unscored) _git.GetDiff(c);
+            });
 
-                foreach (var (hash, entry) in result.Scored)
-                    _scores.Entries[hash] = entry;
-                // Clean generation (cache was empty at session start): stamp current versions.
-                // Mixed generations keep the old header so the "older prompt" banner stays
-                // until an explicit re-score.
-                if (stampHeader)
+            var batches = Chunk(unscored, ScoreService.MaxCommitsPerBatch).ToList();
+            var sameDayContext = DevCommits()
+                .Where(c => c.AuthorDate.Date == day && _scores.Entries.ContainsKey(c.Hash) &&
+                            !unscored.Contains(c))
+                .ToList();
+
+            for (var i = 0; i < batches.Count; i++)
+            {
+                // Later batches receive the earlier batches' commit list as same-day context.
+                var context = sameDayContext.Concat(
+                    batches.Take(i).SelectMany(b => b).Where(c => _scores.Entries.ContainsKey(c.Hash))).ToList();
+
+                try
                 {
-                    _scores.PromptVersion = ScoreService.PromptVersion;
-                    _scores.AnchorVersion = _anchors!.AnchorVersion;
+                    var batch = batches[i];
+                    var result = await _scoreService.ScoreBatchAsync(
+                        batch, context, _anchors,
+                        status: s => SetStatus($"{day:yyyy-MM-dd}: {s}"),
+                        output: AppendLlmOutput);
+
+                    foreach (var (hash, entry) in result.Scored)
+                        _scores.Entries[hash] = entry;
+                    // Clean generation (cache was empty at session start): stamp current versions.
+                    // Mixed generations keep the old header so the "older prompt" banner stays
+                    // until an explicit re-score.
+                    if (stampHeader)
+                    {
+                        _scores.PromptVersion = ScoreService.PromptVersion;
+                        _scores.AnchorVersion = _anchors!.AnchorVersion;
+                    }
+                    Store.SaveScores(_scores);
                 }
-                Store.SaveScores(_scores);
+                catch (ScoreBatchFailedException ex)
+                {
+                    AppLog.Error($"score batch failed for {day:yyyy-MM-dd}", ex);
+                    ShowDiagnostics(ex);
+                    // Leave this batch unscored; continue with the rest of the day/window.
+                }
             }
-            catch (ScoreBatchFailedException ex)
-            {
-                AppLog.Error($"score batch failed for {day:yyyy-MM-dd}", ex);
-                ShowDiagnostics(ex);
-                // Leave this batch unscored; continue with the rest of the day/window.
-            }
+        }
+        finally
+        {
+            EndLlmOutput();
         }
     }
 
@@ -551,6 +568,7 @@ public partial class MainWindow : Window
         var weekStart = ((Button)sender).Tag as DateTime?;
         if (weekStart == null || _busy || _selectedDev == null || _interpret == null) return;
         _busy = true;
+        BeginLlmOutput($"LLM output: week of {weekStart:yyyy-MM-dd}");
         SetStatus($"week {weekStart:yyyy-MM-dd}: regenerating report…");
         try
         {
@@ -559,7 +577,7 @@ public partial class MainWindow : Window
                 .ToList();
             var report = await _interpret.GetWeekReportAsync(
                 _selectedDev.Id, weekStart.Value, weekCommits, DevCommits().ToList(), _scores, true,
-                status: SetStatus);
+                status: SetStatus, output: AppendLlmOutput);
             RenderWeekView(weekStart.Value, report, weekCommits);
         }
         catch (ScoreBatchFailedException ex)
@@ -574,6 +592,7 @@ public partial class MainWindow : Window
         finally
         {
             _busy = false;
+            EndLlmOutput();
         }
     }
 
@@ -815,6 +834,74 @@ public partial class MainWindow : Window
             ex.Message + "\n\nRaw LLM exchange (also logged to raw/):\n\n" + raw,
             "WorkTracker — LLM diagnostics", MessageBoxButton.OK, MessageBoxImage.Warning);
         SetStatus("LLM batch failed — see diagnostics");
+    }
+
+    private void BeginLlmOutput(string title)
+    {
+        ++_llmOutputGeneration;
+        lock (_llmOutputLock)
+        {
+            _llmOutputBuffer.Clear();
+            _llmOutputUpdatePending = false;
+        }
+        LlmOutputTitle.Text = title;
+        LlmOutputText.Clear();
+        LlmOutputPanel.Visibility = Visibility.Visible;
+        Dispatcher.BeginInvoke(() => LlmOutputText.ScrollToEnd());
+    }
+
+    private void AppendLlmOutput(string chunk)
+    {
+        if (string.IsNullOrEmpty(chunk)) return;
+        lock (_llmOutputLock)
+        {
+            _llmOutputBuffer.Append(chunk);
+            TrimLiveOutput();
+            if (_llmOutputUpdatePending) return;
+            _llmOutputUpdatePending = true;
+        }
+
+        // Coalesce token-sized callbacks into one UI update. This keeps a fast
+        // local model from filling the WPF dispatcher queue.
+        Dispatcher.BeginInvoke(() =>
+        {
+            string text;
+            lock (_llmOutputLock)
+            {
+                text = _llmOutputBuffer.ToString();
+                _llmOutputUpdatePending = false;
+            }
+            if (LlmOutputPanel.Visibility != Visibility.Visible) return;
+            LlmOutputText.Text = text;
+            LlmOutputText.ScrollToEnd();
+        });
+    }
+
+    private void TrimLiveOutput()
+    {
+        if (_llmOutputBuffer.Length > MaxLiveOutputChars)
+            _llmOutputBuffer.Remove(0, _llmOutputBuffer.Length - MaxLiveOutputChars);
+
+        var newlineCount = 0;
+        for (var i = _llmOutputBuffer.Length - 1; i >= 0; i--)
+        {
+            if (_llmOutputBuffer[i] != '\n') continue;
+            newlineCount++;
+            if (newlineCount < MaxLiveOutputLines) continue;
+            _llmOutputBuffer.Remove(0, i + 1);
+            break;
+        }
+    }
+
+    private void EndLlmOutput()
+    {
+        var generation = _llmOutputGeneration;
+        Dispatcher.BeginInvoke(async () =>
+        {
+            await Task.Delay(1200);
+            if (generation == _llmOutputGeneration)
+                LlmOutputPanel.Visibility = Visibility.Collapsed;
+        });
     }
 
     private static string Tail(string s, int n) =>

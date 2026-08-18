@@ -25,6 +25,8 @@ public partial class SettingsWindow : Window
         ThemeCombo.SelectedItem = new[] { "auto", "light", "dark" }.Contains(config.Theme)
             ? config.Theme : "auto";
 
+        BackendCombo.ItemsSource = new[] { "pi", "llama.cpp" };
+        BackendCombo.SelectedItem = config.Llm.Backend == "llama.cpp" ? "llama.cpp" : "pi";
         RepoPathBox.Text = config.RepoPath;
         LlmCommandBox.Text = config.Llm.Command;
         LlmArgsBox.Text = string.Join(' ', config.Llm.Args);
@@ -34,6 +36,13 @@ public partial class SettingsWindow : Window
             "off", "minimal", "low", "medium", "high", "xhigh", "max",
         };
         ThinkingCombo.Text = config.Llm.ThinkingEffort; // free-form; defaults to the closest level
+        LlamaEndpointBox.Text = string.IsNullOrWhiteSpace(config.Llm.LlamaEndpoint)
+            ? "http://192.168.18.126:8080/" : config.Llm.LlamaEndpoint;
+        LlamaModelBox.Text = config.Llm.LlamaModel;
+        LlamaTimeoutBox.Text = config.Llm.TimeoutSeconds.ToString();
+        LlamaThinkingCombo.ItemsSource = new[] { "off", "low", "medium", "high", "max" };
+        LlamaThinkingCombo.Text = config.Llm.LlamaThinkingLevel;
+        UpdateBackendFields();
 
         foreach (var t in config.Grid.LoadThresholds)
         {
@@ -59,6 +68,15 @@ public partial class SettingsWindow : Window
     }
 
     private void OnThemeChanged() => Dispatcher.BeginInvoke(ApplyWindowChrome);
+
+    private void BackendCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateBackendFields();
+
+    private void UpdateBackendFields()
+    {
+        var llama = string.Equals(BackendCombo.SelectedItem as string, "llama.cpp", StringComparison.OrdinalIgnoreCase);
+        PiConfigPanel.Visibility = llama ? Visibility.Collapsed : Visibility.Visible;
+        LlamaConfigPanel.Visibility = llama ? Visibility.Visible : Visibility.Collapsed;
+    }
 
     private void DeveloperList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -118,13 +136,28 @@ public partial class SettingsWindow : Window
             return;
         }
 
+        var backend = BackendCombo.SelectedItem as string ?? "pi";
+        _config.Llm.Backend = backend == "llama.cpp" ? "llama.cpp" : "pi";
         _config.Llm.Command = LlmCommandBox.Text.Trim();
         _config.Llm.Args = LlmArgsBox.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
         var effort = ThinkingCombo.Text?.Trim() ?? "";
         _config.Llm.ThinkingEffort = string.IsNullOrEmpty(effort) ? "" : effort.TrimStart('-');
-        if (!int.TryParse(LlmTimeoutBox.Text.Trim(), out var timeout) || timeout <= 0)
+        _config.Llm.LlamaEndpoint = LlamaEndpointBox.Text.Trim();
+        _config.Llm.LlamaModel = string.IsNullOrWhiteSpace(LlamaModelBox.Text) ? "any" : LlamaModelBox.Text.Trim();
+        var llamaEffort = LlamaThinkingCombo.Text?.Trim() ?? "";
+        _config.Llm.LlamaThinkingLevel = string.IsNullOrEmpty(llamaEffort) ? "low" : llamaEffort.TrimStart('-');
+        var timeoutText = _config.Llm.Backend == "llama.cpp" ? LlamaTimeoutBox.Text : LlmTimeoutBox.Text;
+        if (!int.TryParse(timeoutText.Trim(), out var timeout) || timeout <= 0)
         {
             MessageBox.Show(this, "Timeout must be a positive number of seconds.", "WorkTracker",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        if (_config.Llm.Backend == "llama.cpp" &&
+            (!Uri.TryCreate(_config.Llm.LlamaEndpoint, UriKind.Absolute, out var endpoint) ||
+             (endpoint.Scheme != Uri.UriSchemeHttp && endpoint.Scheme != Uri.UriSchemeHttps)))
+        {
+            MessageBox.Show(this, "llama.cpp endpoint must be an absolute http:// or https:// URL.", "WorkTracker",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }

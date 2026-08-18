@@ -17,7 +17,7 @@ public sealed class CommitRow
     public string MergeTag => Commit.IsMerge ? "  [merge]" : "";
     public string TriageTag => Score?.Triage != null ? $"  [mechanical: {Score.Triage}]" : "";
     public string StatText =>
-        $"{Commit.FilesChanged} files · +{Commit.Insertions} / −{Commit.Deletions}" +
+        $"{Commit.FilesChanged} files · added {Commit.Insertions} lines, removed {Commit.Deletions} lines" +
         (Commit.IsRevert ? " · revert" : "");
 
     public string ScoreText => Score?.Score.ToString() ?? "";

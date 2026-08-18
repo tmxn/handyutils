@@ -90,9 +90,13 @@ worktracker/                  (source repo)
     }
   ],
   "llm": {
+    "backend": "pi",
     "command": "pi",
     "args": ["--no-session", "--print"],
-    "timeoutSeconds": 600
+    "timeoutSeconds": 600,
+    "llamaEndpoint": "http://192.168.18.126:8080/",
+    "llamaModel": "any",
+    "llamaThinkingLevel": "low"
   },
   "grid": {
     "loadThresholds": [0, 1, 10, 20, 35]
@@ -339,6 +343,12 @@ Respond with ONLY valid JSON:
   surface error.
 - No authentication, API keys, or model selection in the app. Provider/model
   are the user's concern in their pi (or other CLI) configuration.
+- The backend may also be `llama.cpp`, using a local OpenAI-compatible
+  `/v1/chat/completions` endpoint. Each request is independent, sends one user
+  message, includes `reasoning_budget`, top-level `reasoning_effort`, and the
+  corresponding `chat_template_kwargs` routing fields, then streams response
+  deltas to the UI. The modes are off (0 tokens), low (512), medium (2048),
+  high (8192), and max (-1/unrestricted).
 
 ## 10. UI
 

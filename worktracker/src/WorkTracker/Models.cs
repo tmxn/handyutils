@@ -25,6 +25,9 @@ public sealed class Developer
 
 public sealed class LlmSettings
 {
+    // "pi" keeps the existing process-backed integration; "llama.cpp" uses its
+    // local OpenAI-compatible chat-completions endpoint.
+    public string Backend { get; set; } = "pi";
     public string Command { get; set; } = "pi";
     public List<string> Args { get; set; } = new() { "--no-session", "--print" };
     public int TimeoutSeconds { get; set; } = 600;
@@ -32,6 +35,12 @@ public sealed class LlmSettings
     // Values: off, minimal, low, medium, high, xhigh, max. Applied only when the
     // resolved command looks like pi; user-provided args may still override.
     public string ThinkingEffort { get; set; } = "medium";
+
+    // llama.cpp server settings. Authentication is intentionally not part of the
+    // MVP; local llama.cpp servers do not need it.
+    public string LlamaEndpoint { get; set; } = "http://192.168.18.126:8080/";
+    public string LlamaModel { get; set; } = "any";
+    public string LlamaThinkingLevel { get; set; } = "low";
 }
 
 public sealed class GridSettings

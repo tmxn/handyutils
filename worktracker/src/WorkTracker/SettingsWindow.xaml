@@ -12,7 +12,11 @@
             <TextBox x:Name="RepoPathBox" Padding="3" Margin="0,0,0,10"/>
 
             <!-- LLM -->
-            <TextBlock Text="LLM command" FontWeight="Bold" FontSize="13" Margin="0,4,0,6"/>
+            <TextBlock Text="LLM backend" FontWeight="Bold" FontSize="13" Margin="0,4,0,6"/>
+            <ComboBox x:Name="BackendCombo" Width="130" HorizontalAlignment="Left"
+                      Margin="0,0,0,10" SelectionChanged="BackendCombo_SelectionChanged"/>
+
+            <StackPanel x:Name="PiConfigPanel">
             <Grid Margin="0,0,0,10">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -36,8 +40,40 @@
                 <TextBlock Text="thinking effort (pi):" VerticalAlignment="Center" Margin="0,0,8,0"/>
                 <ComboBox x:Name="ThinkingCombo" Grid.Column="1" Width="110" Padding="3"/>
                 <TextBlock Grid.Column="2" Text="ignored for non-pi commands; leave any --thinking out of args above"
-                           VerticalAlignment="Center" Foreground="{DynamicResource TextMuted}" Margin="10,0,0,0" FontSize="11"/>
+                            VerticalAlignment="Center" Foreground="{DynamicResource TextMuted}" Margin="10,0,0,0" FontSize="11"/>
             </Grid>
+            </StackPanel>
+
+            <StackPanel x:Name="LlamaConfigPanel" Visibility="Collapsed">
+                <TextBlock Text="endpoint:" Margin="0,0,0,2"/>
+                <TextBox x:Name="LlamaEndpointBox" Padding="3" Margin="0,0,0,8"/>
+                <Grid Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="110"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="model:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBox x:Name="LlamaModelBox" Grid.Column="1" Padding="3"/>
+                    <TextBlock Grid.Column="2" Text="timeout (s):" VerticalAlignment="Center" Margin="12,0,8,0"/>
+                    <TextBox x:Name="LlamaTimeoutBox" Grid.Column="3" Padding="3"/>
+                </Grid>
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="110"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="thinking level:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <ComboBox x:Name="LlamaThinkingCombo" Grid.Column="1" Padding="3"/>
+                    <TextBlock Grid.Column="2" Text="sent as chat_template_kwargs.reasoning_effort"
+                               VerticalAlignment="Center" Foreground="{DynamicResource TextMuted}"
+                               Margin="10,0,0,0" FontSize="11"/>
+                </Grid>
+                <TextBlock Text="The request uses the local OpenAI-compatible /v1/chat/completions endpoint. No API key is sent."
+                           Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" FontSize="11" Margin="0,0,0,10"/>
+            </StackPanel>
 
             <!-- Load thresholds -->
             <TextBlock Text="Grid load thresholds (5 cutoffs → 6 color steps)" FontWeight="Bold"
