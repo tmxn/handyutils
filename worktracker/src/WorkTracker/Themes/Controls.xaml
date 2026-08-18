@@ -1,5 +1,12 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:wt="clr-namespace:WorkTracker">
+
+    <!-- SelectableTextBox derives from TextBox, so the implicit TextBox style above
+         does not apply to it; give it the same theme-aware defaults. -->
+    <Style TargetType="wt:SelectableTextBox">
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+    </Style>
 
     <!-- ============ Button ============ -->
     <Style TargetType="Button">
