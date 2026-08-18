@@ -1,7 +1,7 @@
 <Window x:Class="WorkTracker.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="WorkTracker" Height="900" Width="1400"
+        Title="WorkTracker" Height="900" Width="1400" Icon="icon.ico"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBackground}" Foreground="{DynamicResource TextPrimary}">
     <DockPanel Margin="8">

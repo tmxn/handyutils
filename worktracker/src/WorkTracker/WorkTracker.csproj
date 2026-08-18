@@ -8,7 +8,13 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>WorkTracker</AssemblyName>
     <RootNamespace>WorkTracker</RootNamespace>
+    <ApplicationIcon>..\..\icon.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Window icon, embedded so Xaml Icon="icon.ico" resolves. -->
+    <Resource Include="..\..\icon.ico" Link="icon.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- Baked calibration anchors ship next to the executable and are also
