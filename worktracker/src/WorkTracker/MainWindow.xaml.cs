@@ -166,7 +166,7 @@ public partial class MainWindow : Window
 
     // ---------- developer / grid ----------
 
-    private async void DeveloperCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void DeveloperCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_busy || _collection == null) return;
         if (DeveloperCombo.SelectedItem is not ComboBoxItem { Tag: Developer dev })
@@ -177,7 +177,6 @@ public partial class MainWindow : Window
         _selectedDev = dev;
         BuildGrid();
         DetailHost.Content = null;
-        await AutoScoreAsync();
     }
 
     private IEnumerable<CommitInfo> DevCommits()
@@ -488,39 +487,63 @@ public partial class MainWindow : Window
 
     // ---------- week view ----------
 
-    private async void ShowWeekViewAsync(DateTime weekStart)
+    private void ShowWeekViewAsync(DateTime weekStart)
     {
-        if (_busy || _selectedDev == null || _interpret == null) return;
-        _busy = true;
-        SetStatus($"week {weekStart:yyyy-MM-dd}: loading report…");
-        try
+        if (_selectedDev == null) return;
+        var weekCommits = DevCommits()
+            .Where(c => c.AuthorDate >= weekStart && c.AuthorDate < weekStart.AddDays(7))
+            .ToList();
+        // Try to show a cached report without triggering LLM
+        var cached = Store.LoadReport(_selectedDev.Id, weekStart.ToString("yyyy-MM-dd"));
+        if (cached != null)
         {
-            var weekCommits = DevCommits()
-                .Where(c => c.AuthorDate >= weekStart && c.AuthorDate < weekStart.AddDays(7))
-                .ToList();
-            var report = await _interpret.GetWeekReportAsync(
-                _selectedDev.Id, weekStart, weekCommits, DevCommits().ToList(), _scores, false,
-                status: SetStatus);
-            RenderWeekView(weekStart, report, weekCommits);
+            // Validate cache freshness without generating
+            var inputHash = InterpretService.ComputeInputHash(weekCommits, _scores);
+            if (cached.InputHash == inputHash && cached.PromptVersion == InterpretService.PromptVersion)
+            {
+                RenderWeekView(weekStart, cached, weekCommits);
+                return;
+            }
         }
-        catch (LlmResolveError ex)
+        // No valid cached report – show placeholder with manual generate
+        var panel = new StackPanel { Margin = new Thickness(12) };
+        panel.Children.Add(new TextBlock
         {
-            MessageBox.Show(this, ex.Message, "WorkTracker — LLM setup", MessageBoxButton.OK, MessageBoxImage.Warning);
-            SetStatus("LLM command not found");
-        }
-        catch (ScoreBatchFailedException ex)
+            Text = $"Week of {weekStart:yyyy-MM-dd}",
+            FontWeight = FontWeights.Bold,
+            FontSize = 18,
+            Margin = new Thickness(0, 0, 0, 2),
+        });
+        panel.Children.Add(new TextBlock
         {
-            ShowDiagnostics(ex);
-        }
-        catch (Exception ex)
+            Text = $"{weekCommits.Count} commits", 
+            Foreground = UiPalette.MutedText,
+            FontSize = 12,
+            Margin = new Thickness(0,0,0,12),
+        });
+        var btn = new Button
         {
-            AppLog.Error("week report failed", ex);
-            MessageBox.Show(this, ex.Message, "WorkTracker — week report", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-        finally
+            Content = "Generate report",
+            Padding = new Thickness(10,3,10,3),
+            Margin = new Thickness(0,0,0,12),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Tag = weekStart,
+        };
+        btn.Click += RegenerateWeekReport_Click;
+        panel.Children.Add(btn);
+        panel.Children.Add(new TextBlock
         {
-            _busy = false;
-        }
+            Text = "Report generation is manual. Click 'Generate report' or use Tools → Re-score to refresh scores.",
+            Foreground = UiPalette.MutedText,
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        DetailHost.Content = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = panel,
+        };
+        SetStatus($"week {weekStart:yyyy-MM-dd}: {weekCommits.Count} commits ready");
     }
 
     private async void RegenerateWeekReport_Click(object sender, RoutedEventArgs e)
@@ -742,6 +765,12 @@ public partial class MainWindow : Window
         _scores.Entries.Clear();
         Store.SaveScores(_scores);
         BuildGrid();
+        await AutoScoreAsync();
+    }
+
+    private async void StartLlm_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedDev == null || _busy) return;
         await AutoScoreAsync();
     }
 

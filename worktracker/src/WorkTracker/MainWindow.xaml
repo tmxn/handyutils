@@ -19,6 +19,7 @@
                               SelectionChanged="DeveloperCombo_SelectionChanged"/>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                    <Button x:Name="StartLlmButton" Content="Start LLM" Padding="10,3" Margin="0,0,8,0" Click="StartLlm_Click"/>
                     <Menu Background="Transparent" VerticalAlignment="Center" Margin="0,0,8,0">
                         <MenuItem Header="Tools">
                             <MenuItem x:Name="RescoreDayMenu" Header="Re-score day"
