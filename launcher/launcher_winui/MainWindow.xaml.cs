@@ -20,7 +20,8 @@ public sealed partial class MainWindow : Window
     private readonly Grid _itemPanel = new();
     private readonly TextBlock _emptyText = new();
     private readonly TextBlock _previewText = new();
-    private readonly Palette _palette;
+    private Palette _palette;
+    private bool _isDark;
     private int _selectedIndex = -1;
     private bool _armed;
     private bool _heightPrimed; // once set, the window may only grow in height
@@ -42,7 +43,8 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
 
-        _palette = SystemTheme.IsDarkMode() ? Palette.Dark : Palette.Light;
+        _isDark = SystemTheme.IsDarkMode();
+        _palette = _isDark ? Palette.Dark : Palette.Light;
 
         // The window is made borderless via Native.MakeBorderless() in OnLoaded
         // (strips the caption frame), so the XAML content fills the whole
@@ -450,6 +452,8 @@ public sealed partial class MainWindow : Window
     /// </summary>
     public void ShowAtCursor()
     {
+        RefreshThemeIfChanged();
+
         // No-op when already visible; required when re-showing a hidden window.
         AppWindow.Show();
 
@@ -479,6 +483,30 @@ public sealed partial class MainWindow : Window
     }
 
     // ------------------------------------------------------------------ tray
+
+    /// <summary>
+    /// The window stays hidden in the tray indefinitely, while the system
+    /// theme can flip any time. The native Mica backdrop follows the system
+    /// on its own; our custom brushes don't. Reapply the palette in place
+    /// when it has changed. Called right before every show.
+    /// </summary>
+    private void RefreshThemeIfChanged()
+    {
+        bool dark = SystemTheme.IsDarkMode();
+        if (dark == _isDark)
+            return;
+
+        _isDark = dark;
+        _palette = dark ? Palette.Dark : Palette.Light;
+        Root.RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light;
+        if (!SystemTheme.IsWindows11())
+            Root.Background = _palette.FallbackBackground;
+
+        // Buttons captured the old palette's brushes — rebuild with the new one.
+        BuildCategoryButtons();
+        BuildItemButtons();
+        App.Log($"theme changed to {(dark ? "dark" : "light")} — palette re-applied");
+    }
 
     /// <summary>Re-read ~/.launcher/config.json and rebuild the whole UI.</summary>
     public void ReloadConfig()
