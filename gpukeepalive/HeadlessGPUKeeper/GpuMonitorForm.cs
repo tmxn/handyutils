@@ -15,6 +15,11 @@ public sealed class GpuMonitorForm : Form
 {
     const string RegPath = @"Software\HeadlessGPUKeeper";
 
+    // Linger (after llama-server exits) until the adapter's dedicated usage is back
+    // at this idle baseline plus a short tail, so the freed VRAM is actually visible.
+    const double LingerVramLimitMb = KeeperCore.IdlePokeVramLimitMb;
+    const int LingerTailSeconds = 5;
+
     [DllImport("user32.dll")]
     static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
@@ -37,6 +42,8 @@ public sealed class GpuMonitorForm : Form
     bool _readyToShow;
     DateTime _lingerUntil;
     bool _dragging;
+    bool _wasAtBaseline;
+    bool _wasIdlePoking;
     Point _dragOffset;
 
     public GpuMonitorForm()
@@ -138,7 +145,9 @@ public sealed class GpuMonitorForm : Form
             using var key = Registry.CurrentUser.OpenSubKey(RegPath);
             int x = key?.GetValue("X") as int? ?? -1;
             int y = key?.GetValue("Y") as int? ?? -1;
-            if (x >= 0 && y >= 0)
+            // Reject saved positions that are no longer on any screen (e.g. the
+            // monitor resolution dropped), so the borderless window is reachable.
+            if (x >= 0 && y >= 0 && OnAnyWorkingArea(new Point(x, y)))
             {
                 Location = new Point(x, y);
             }
@@ -153,6 +162,9 @@ public sealed class GpuMonitorForm : Form
             Location = new Point(Screen.PrimaryScreen!.WorkingArea.Right - Width, Screen.PrimaryScreen.WorkingArea.Top);
         }
     }
+
+    static bool OnAnyWorkingArea(Point p)
+        => Screen.AllScreens.Any(s => s.WorkingArea.Contains(p));
 
     void SavePosition()
     {
@@ -214,19 +226,45 @@ public sealed class GpuMonitorForm : Form
     void OnTick(object? sender, EventArgs e)
     {
         _readyToShow = true;
-        bool active = _core.Tick() == KeeperCore.ModeActive;
-        if (active) _lingerUntil = DateTime.UtcNow.AddSeconds(10);
+        bool wasShowing = _isActive;
 
-        // Stay visible for 10s after llama-server exits before hiding.
-        bool showing = active || DateTime.UtcNow < _lingerUntil;
+        // Only the UI reads VRAM/load, and only while visible: the PDH counters
+        // are torn down the moment we hide. Sample before the keeper tick so the
+        // post-exit poke suppression can use the latest usage.
+        double vramMb = 0, loadPercent = 0;
+        double? coreVram = null;
+        if (wasShowing)
+        {
+            _monitor?.Enable();
+            (vramMb, loadPercent) = _monitor?.Sample() ?? (0, 0);
+            coreVram = vramMb;
+        }
+
+        bool active = _core.Tick(coreVram) == KeeperCore.ModeActive;
+
+        // Stay visible while llama-server runs, and after it exits until the
+        // adapter's usage is back at the idle baseline plus a short tail.
+        // Arm the tail once, on whichever comes first: usage dropping to baseline,
+        // or the keeper firing its first idle poke. Never refresh it afterwards:
+        // the poke itself allocates >100 MB, so usage-based checks would keep the
+        // UI up forever.
+        bool atBaseline = vramMb <= LingerVramLimitMb;
+        bool idlePoking = _core.IdlePoking;
+        if ((atBaseline && !_wasAtBaseline) || (idlePoking && !_wasIdlePoking))
+            _lingerUntil = DateTime.UtcNow.AddSeconds(LingerTailSeconds);
+        _wasAtBaseline = atBaseline;
+        _wasIdlePoking = idlePoking;
+
+        // Once idle poking has started the tail is the only thing keeping the UI
+        // up (poke VRAM spikes must not extend it).
+        bool tailRunning = DateTime.UtcNow < _lingerUntil;
+        bool showing = active || (wasShowing && (idlePoking ? tailRunning : !atBaseline || tailRunning));
         _isActive = showing;
 
         if (showing)
         {
-            _monitor?.Enable();
             Show();
             SetWindowPos(Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
-            var (vramMb, loadPercent) = _monitor?.Sample() ?? (0, 0);
             _vramLabel.Text = FormatVram(vramMb);
             _loadBar.Value = (int)Math.Round(loadPercent);
         }

@@ -21,10 +21,19 @@ public sealed class KeeperCore
     const int processCheckIntervalMs = 1000;
     const int adapterRetryMs = 1000;
 
-    const int StateSize = 16;
+    /// <summary>
+    /// Idle-mode pokes are suppressed while the adapter's dedicated usage is above
+    /// this: right after llama-server exits its VRAM takes a moment to be released,
+    /// and we want the GPU back at its idle baseline as fast as possible.
+    /// </summary>
+    public const double IdlePokeVramLimitMb = 150.0;
+
+    const int StateSize = 24;
+    const int LegacyStateSize = 16; // pre-VRAM-check layout
     const int OffsetMagic = 0;
     const int OffsetLastPokeTicks = 4;
     const int OffsetMode = 12;
+    const int OffsetLastVramCheckTicks = 16;
 
     const uint TH32CS_SNAPPROCESS = 0x00000002;
 
@@ -97,6 +106,8 @@ public sealed class KeeperCore
     readonly StateFile _state = new();
     IntPtr _targetAdapter;
     long _lastPokeTicks;
+    long _lastVramCheckTicks;
+    bool _idlePoking;
     bool _llamaRunning;
     long _lastProcessCheckTicks;
     long _lastAdapterSearchTicks;
@@ -110,11 +121,24 @@ public sealed class KeeperCore
     public IntPtr TargetAdapter => _targetAdapter;
 
     /// <summary>
-    /// One tick of the keep-alive loop. Returns the current mode (active/idle).
+    /// True once an idle poke has fired since the last active period. The UI uses
+    /// this to close unconditionally after its tail expires: poking itself allocates
+    /// enough VRAM to trip the baseline check again, so usage can no longer extend
+    /// the linger.
     /// </summary>
-    public int Tick()
+    public bool IdlePoking => _idlePoking;
+
+    /// <summary>
+    /// One tick of the keep-alive loop. Returns the current mode (active/idle).
+    /// vramMb is the adapter's current dedicated usage; when provided and above
+    /// IdlePokeVramLimitMb, idle-mode pokes are deferred (e.g. while the VRAM of a
+    /// just-exited llama-server is still being released). null means unknown and
+    /// keeps the original unconditional idle poke cadence.
+    /// </summary>
+    public int Tick(double? vramMb = null)
     {
         long now = DateTime.UtcNow.Ticks;
+        if (vramMb is not null) _lastVramCheckTicks = now;
         bool active = LlamaServerRunning(now);
 
         if (_targetAdapter == IntPtr.Zero &&
@@ -137,17 +161,23 @@ public sealed class KeeperCore
                     Poke(_targetAdapter);
                     _lastPokeTicks = now;
                 }
-                _state.Write(_lastPokeTicks, ModeActive);
-            }
-            else if (now - _lastPokeTicks >= idleIntervalMs * TimeSpan.TicksPerMillisecond)
-            {
-                Poke(_targetAdapter);
-                _lastPokeTicks = now;
-                _state.Write(now, ModeIdle);
+                // A new active period restarts the post-exit release phase.
+                _idlePoking = false;
+                _state.Write(_lastPokeTicks, ModeActive, _lastVramCheckTicks);
             }
             else
             {
-                _state.Write(_lastPokeTicks, ModeIdle);
+                // Wait for the adapter to drop back to its idle baseline before
+                // poking again (llama-server's VRAM may still be in the process of
+                // being released).
+                bool atBaseline = vramMb is not double v || v <= IdlePokeVramLimitMb;
+                if (atBaseline && now - _lastPokeTicks >= idleIntervalMs * TimeSpan.TicksPerMillisecond)
+                {
+                    Poke(_targetAdapter);
+                    _lastPokeTicks = now;
+                    _idlePoking = true;
+                }
+                _state.Write(_lastPokeTicks, ModeIdle, _lastVramCheckTicks);
             }
         }
 
@@ -160,23 +190,39 @@ public sealed class KeeperCore
         try
         {
             using var file = MemoryMappedFile.OpenExisting(StateName);
-            using var view = file.CreateViewAccessor(0, StateSize);
-            uint magic = view.ReadUInt32(OffsetMagic);
+            // Tolerate a shorter state file left over from an older version.
+            MemoryMappedViewAccessor view;
+            try
+            {
+                view = file.CreateViewAccessor(0, StateSize);
+            }
+            catch (ArgumentException)
+            {
+                view = file.CreateViewAccessor(0, LegacyStateSize);
+            }
+            using var v = view;
+            long readable = v.Capacity;
+            uint magic = v.ReadUInt32(OffsetMagic);
             if (magic == StateMagic)
             {
-                long ticks = view.ReadInt64(OffsetLastPokeTicks);
-                int mode = view.ReadInt32(OffsetMode);
+                long ticks = v.ReadInt64(OffsetLastPokeTicks);
+                int mode = v.ReadInt32(OffsetMode);
                 string modeStr = mode == ModeActive ? "Active (llama-server running)" : "Idle";
-                string lastPokeAgo = ticks > 0
-                    ? $"poked {Math.Max(0, (long)((DateTime.UtcNow.Ticks - ticks) / TimeSpan.TicksPerSecond))} seconds ago"
-                    : "never poked";
-                message = $"Another HeadlessGPUKeeper is already running.\n\nMode: {modeStr}\nLast GPU poke: {lastPokeAgo}";
+                string lastVramCheck = readable >= OffsetLastVramCheckTicks + 8
+                    ? DescribeAgo(v.ReadInt64(OffsetLastVramCheckTicks))
+                    : "never checked (older version running)";
+                message = $"Another HeadlessGPUKeeper is already running.\n\nMode: {modeStr}\nLast GPU poke: {DescribeAgo(ticks)}\nLast VRAM check: {lastVramCheck}";
             }
         }
         catch { }
 
         return message;
     }
+
+    static string DescribeAgo(long ticks)
+        => ticks > 0
+            ? $"{Math.Max(0, (long)((DateTime.UtcNow.Ticks - ticks) / TimeSpan.TicksPerSecond))} seconds ago"
+            : "never";
 
     IntPtr FindTargetAdapter()
     {
@@ -262,10 +308,11 @@ public sealed class KeeperCore
             view.Write(OffsetMagic, StateMagic);
         }
 
-        public void Write(long lastPokeTicks, int mode)
+        public void Write(long lastPokeTicks, int mode, long lastVramCheckTicks)
         {
             view.Write(OffsetLastPokeTicks, lastPokeTicks);
             view.Write(OffsetMode, mode);
+            view.Write(OffsetLastVramCheckTicks, lastVramCheckTicks);
         }
 
         public void Dispose()
