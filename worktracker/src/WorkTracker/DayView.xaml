@@ -35,6 +35,7 @@
                                 <Expander Header="diff" Margin="0,4,0,0"
                                           Visibility="{Binding DiffVisibility}">
                                     <wt:SelectableTextBox Text="{Binding DiffText, Mode=OneWay}"
+                                                          Foreground="{DynamicResource TextPrimary}"
                                                           FontFamily="Consolas" FontSize="11" Margin="4,0,0,0"/>
                                 </Expander>
                             </StackPanel>
