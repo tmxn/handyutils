@@ -4,6 +4,105 @@ using WorkTracker.Services;
 // Non-UI smoke test: git collection, parsing, windowing, diff fetch. No LLM calls.
 // With "score" as second arg: additionally runs one real Pass-1 scoring batch via the
 // configured LLM command (default: pi + github-copilot/gpt-5.6-luna). Not cached to disk.
+// Offline NarrativeParser tests: wtcheck parser
+if (args.Length > 1 && args[1] == "parser")
+{
+    Console.WriteLine("--- NarrativeParser offline tests ---");
+    int pfail = 0;
+    void PCheck(bool cond, string what) { Console.WriteLine((cond ? "  ok  " : "  FAIL ") + what); if (!cond) pfail++; }
+
+    var good = """
+        ##Summary
+        Steady week focused on the parser rewrite.
+        Six commits, mostly mid-size.
+
+        ##Notable
+        - Reworked the tokenizer in a1b2c3d, +420/-180
+        - Reverted the config change e4f5a6b
+
+        ##Signals
+        - [possible_blocker] Revert after a failing test. Evidence: e4f5a6b, a1b2c3d
+        - [wip_chain] Four work-in-progress commits touching parser.c. Evidence: 00c1d2e, 11d2e3f
+
+        ##AlternativeExplanations
+        - The revert was caught by CI, likely a quick fix
+        - The WIP chain may be a refactor split
+
+        ##Questions
+        - Did the parser rewrite hit a design question? (a1b2c3d)
+        """;
+    var n = NarrativeParser.Parse(good);
+    PCheck(n.Summary.StartsWith("Steady week"), "summary joined from multiple lines");
+    PCheck(n.Notable.Count == 2, "notable items");
+    PCheck(n.Signals.Count == 2, "signals parsed");
+    PCheck(n.Signals[0].Type == "possible_blocker", "signal type 1");
+    PCheck(n.Signals[0].Evidence.Count == 2 && n.Signals[0].Evidence[0] == "e4f5a6b", "evidence hashes");
+    PCheck(n.Signals[1].Type == "wip_chain", "signal type 2");
+    PCheck(n.AlternativeExplanations.Count == 2, "alternative explanations");
+    PCheck(n.Questions.Count == 1, "questions");
+
+    // Model drift: lowercase markers, colon suffix, numbered/plain lines, "none", missing section, prose preamble.
+    var drift = """
+        Here is the report for the week:
+        ##summary
+        Quiet week. Little activity.
+        ##Notable:
+        1. merged hotfix 9f8e7d6
+        2. fixed crash 1a2b3c4
+        ##Signals
+        none
+        ##Questions
+        Was the hotfix 9f8e7d6 related to the outage?
+        """;
+    var d = NarrativeParser.Parse(drift);
+    PCheck(d.Summary == "Quiet week. Little activity.", "lowercase marker + multi-line summary");
+    PCheck(d.Notable.Count == 2 && d.Notable[0].StartsWith("merged hotfix"), "numbered items");
+    PCheck(d.Signals.Count == 0, "'none' under Signals ignored");
+    PCheck(d.AlternativeExplanations.Count == 0, "missing section -> empty");
+    PCheck(d.Questions.Count == 1, "question without bullet");
+
+    var noEv = NarrativeParser.Parse("""
+        ##Summary
+        A week.
+        ##Signals
+        - [other] Something odd.
+        """);
+    PCheck(noEv.Signals[0].Type == "other", "signal without evidence: type");
+    PCheck(noEv.Signals[0].Evidence.Count == 0, "signal without evidence: empty evidence");
+    PCheck(noEv.Signals[0].Description == "Something odd.", "signal without evidence: description kept");
+
+    var loose = NarrativeParser.Parse("""
+        ##Summary
+        A week.
+        ##Signals
+        - [mystery] desc. evidence: commit deadbee and cafebabe
+        """);
+    PCheck(loose.Signals[0].Type == "other", "unknown signal type -> other");
+    PCheck(loose.Signals[0].Evidence.Count == 2 && loose.Signals[0].Evidence[1] == "cafebabe", "loose evidence phrasing -> hash tokens");
+    PCheck(loose.Signals[0].Description == "desc.", "description cut at evidence marker");
+
+    try
+    {
+        NarrativeParser.Parse("""
+            ##Summary
+            ##Notable
+            - x
+            """);
+        PCheck(false, "empty summary throws");
+    }
+    catch (FormatException) { PCheck(true, "empty summary throws"); }
+
+    try
+    {
+        NarrativeParser.Parse("just some prose without markers");
+        PCheck(false, "no markers throws");
+    }
+    catch (FormatException) { PCheck(true, "no markers throws"); }
+
+    Console.WriteLine(pfail == 0 ? "ALL CHECKS PASSED" : $"{pfail} CHECK(S) FAILED");
+    return pfail == 0 ? 0 : 1;
+}
+
 var repo = args.Length > 0 ? args[0] : Directory.GetCurrentDirectory();
 var doScore = args.Length > 1 && args[1] == "score";
 var doInterpret = args.Length > 2 && args[2] == "interpret";

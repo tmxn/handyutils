@@ -250,20 +250,32 @@ Respond with ONLY valid JSON:
 - Input: the week's commits (hash, date, subject, score, comment, stat —
   **no diffs**) plus the other weeks of the 4-day window aggregated per day
   (load + commit count) so the narrative may compare within the developer.
-- Output JSON:
-```json
-{
-  "weekStart": "2026-02-09",
-  "summary": "2-4 sentence activity summary",
-  "notable": ["…items worth manager attention, each tied to commit hashes…"],
-  "signals": [
-    {"type": "possible_blocker|possible_struggle|revert_loop|wip_chain|other",
-     "description": "…", "evidence": ["hash", "…"]}
-  ],
-  "alternativeExplanations": ["…(meetings, debugging, blocked time…)…"],
-  "questions": ["…specific questions for a 1:1, evidence-linked…"]
-}
+- Output: plain text with section markers (NOT JSON — models drop braces and
+  break strict JSON validation more often than not). The prompt requires
+  exactly these five sections, each marker on its own line:
 ```
+##Summary
+2-4 sentence activity summary.
+
+##Notable
+- items worth manager attention, each tied to commit hashes
+
+##Signals
+- [possible_blocker|possible_struggle|revert_loop|wip_chain|other] description. Evidence: hash1, hash2
+
+##AlternativeExplanations
+- …(meetings, debugging, blocked time…)…
+
+##Questions
+- …specific questions for a 1:1, evidence-linked…
+```
+  (`weekStart` is stamped by the app, not asked from the model.)
+- Parsing (`NarrativeParser`): deliberately lenient — case-insensitive
+  markers, stray colons, bullet-less/numbered/plain lines, prose preamble,
+  missing sections (→ empty), "none" under Signals (→ no signals), unknown
+  signal types (→ "other"), evidence extracted as 7-40 hex tokens after an
+  "evidence:" marker (or simply absent). Hard errors: no recognizable section
+  markers at all, or an empty ##Summary.
 - Prompt constraints: no goal-based evaluation, no employment verdicts, no
   cross-developer statements (MVP). Every negative signal must carry evidence
   hashes and at least one alternative explanation.

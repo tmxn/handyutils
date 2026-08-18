@@ -12,6 +12,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="wtcheck" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Window icon, embedded so Xaml Icon="icon.ico" resolves. -->
     <Resource Include="..\..\icon.ico" Link="icon.ico" />
   </ItemGroup>

@@ -9,7 +9,7 @@ namespace WorkTracker.Services;
 /// </summary>
 public sealed class InterpretService
 {
-    public const int PromptVersion = 4;
+    public const int PromptVersion = 5;
 
     private readonly LlmRunner _llm;
 
@@ -59,24 +59,17 @@ public sealed class InterpretService
         AppLog.Info($"week {weekStartStr} report generated in {sw.Elapsed.TotalSeconds:F0}s " +
                     $"(prompt {prompt.Length} chars)");
 
-        var json = JsonExtract.ExtractFirstJsonObject(result.Stdout);
-        if (json == null)
-            throw new ScoreBatchFailedException(
-                "LLM did not return a valid JSON report. See raw/ for details.",
-                result, prompt);
-
         WeekNarrative narrative;
         try
         {
-            narrative = System.Text.Json.JsonSerializer.Deserialize<WeekNarrative>(json,
-                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-                       ?? throw new InvalidOperationException("Empty narrative.");
+            narrative = NarrativeParser.Parse(result.Stdout);
         }
         catch (Exception ex)
         {
             throw new ScoreBatchFailedException(
-                $"Report JSON could not be parsed: {ex.Message}", result, prompt);
+                $"Report could not be parsed: {ex.Message}. See raw/ for details.", result, prompt);
         }
+        narrative.WeekStart = weekStartStr;
         Sanitize(narrative);
 
         var report = new ReportFile
@@ -129,11 +122,23 @@ public sealed class InterpretService
         var sb = new StringBuilder();
         sb.AppendLine($"You are preparing 1:1 review material for a manager about developer '{developerId}' for the week starting {weekStart:yyyy-MM-dd}.");
         sb.AppendLine();
-        sb.AppendLine("OUTPUT REQUIREMENTS (strict):");
+        sb.AppendLine("OUTPUT FORMAT (strict — plain text, NOT JSON):");
         sb.AppendLine("- Write all text in plain ASCII: straight quotes/apostrophes, no curly quotes, no decorative dashes or ellipses.");
+        sb.AppendLine("- Use exactly these five sections, each marker on its own line, in this order:");
+        sb.AppendLine("  ##Summary");
+        sb.AppendLine("  ##Notable");
+        sb.AppendLine("  ##Signals");
+        sb.AppendLine("  ##AlternativeExplanations");
+        sb.AppendLine("  ##Questions");
+        sb.AppendLine("- ##Summary: 2-4 sentence activity summary.");
+        sb.AppendLine("- ##Notable: bullet list (one \\\"- item\\\" per line), each item tied to commit hashes.");
+        sb.AppendLine("- ##Signals: one bullet per line in exactly this shape: - [type] description. Evidence: hash1, hash2");
+        sb.AppendLine("  where type is one of: possible_blocker | possible_struggle | revert_loop | wip_chain | other.");
+        sb.AppendLine("  If there are no signals, write the single word \\\"none\\\" under the marker.");
+        sb.AppendLine("- ##AlternativeExplanations: bullet list of alternative explanations for the signals (meetings, debugging, blocked time, etc.).");
+        sb.AppendLine("- ##Questions: bullet list of specific, evidence-linked questions for a 1:1.");
+        sb.AppendLine("- No JSON, no code fences, no sections other than the five listed.");
         sb.AppendLine("- This is review material with evidence and hypotheses, NOT a performance verdict. No goal-based evaluation, no employment verdicts, no cross-developer statements, no numeric ratings.");
-        sb.AppendLine("- Every negative signal must carry evidence commit hashes and at least one alternative explanation (meetings, debugging, blocked time, etc.).");
-        sb.AppendLine("- Questions must be specific and evidence-linked.");
         sb.AppendLine();
         sb.AppendLine("WEEK COMMITS (hash, date, subject, score, comment, stat):");
         foreach (var c in weekCommits.OrderBy(c => c.AuthorDate))
@@ -164,10 +169,7 @@ public sealed class InterpretService
             sb.AppendLine($"{g.Key:yyyy-MM-dd} | load {load} | {count} commits");
         }
         sb.AppendLine();
-        sb.AppendLine("Respond with ONLY valid JSON, no markdown fences, in exactly this shape:");
-        sb.AppendLine("""
-{"weekStart": "yyyy-MM-dd", "summary": "2-4 sentence activity summary", "notable": ["items worth manager attention, each tied to commit hashes"], "signals": [{"type": "possible_blocker|possible_struggle|revert_loop|wip_chain|other", "description": "...", "evidence": ["hash", "..."]}], "alternativeExplanations": ["..."], "questions": ["specific questions for a 1:1, evidence-linked"]}
-""");
+        sb.AppendLine("Respond with ONLY the plain-text report described above. Start directly with ##Summary.");
         return sb.ToString();
     }
 }
