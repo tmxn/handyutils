@@ -36,7 +36,7 @@ public sealed class CommitRow
     /// <summary>Merges are visually de-emphasized.</summary>
     public Brush MergeBackground => Commit.IsMerge
         ? UiPalette.MergeBackground
-        : Brushes.Transparent;
+        : Theme.Brush("WindowBackground");
 }
 
 /// <summary>

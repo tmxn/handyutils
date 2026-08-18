@@ -4,7 +4,7 @@
         Title="WorkTracker Settings" Height="700" Width="720" Icon="icon.ico"
         WindowStartupLocation="CenterOwner"
         Background="{DynamicResource WindowBackground}" Foreground="{DynamicResource TextPrimary}">
-    <ScrollViewer VerticalScrollBarVisibility="Auto">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{DynamicResource WindowBackground}">
         <StackPanel Margin="14">
 
             <!-- Repository -->

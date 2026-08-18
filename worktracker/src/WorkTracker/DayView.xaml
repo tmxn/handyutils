@@ -3,7 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:wt="clr-namespace:WorkTracker">
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                  Foreground="{DynamicResource TextPrimary}">
+                  Foreground="{DynamicResource TextPrimary}" Background="{DynamicResource WindowBackground}">
         <StackPanel Margin="12">
             <TextBlock x:Name="TitleText" FontWeight="Bold" FontSize="17" Margin="0,0,0,4"/>
             <TextBlock x:Name="SubtitleText" Foreground="{DynamicResource TextMuted}" FontSize="13" Margin="0,0,0,10"/>

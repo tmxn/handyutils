@@ -67,9 +67,9 @@ public sealed class GitCollector
     {
         var day = d.Date;
         // ISO-style: Monday starts the week (Sunday belongs to the previous week).
-        return d.DayOfWeek == DayOfWeek.Sunday
-            ? day.AddDays(-6)
-            : day.AddDays(-(int)d.DayOfWeek);
+        // Monday = 1 -> offset 0, Sunday = 0 -> offset 6
+        int offset = ((int)d.DayOfWeek + 6) % 7;
+        return day.AddDays(-offset);
     }
 
     private static List<CommitInfo> ParseLog(string output, DateTime windowStart)

@@ -16,7 +16,7 @@
     <SolidColorBrush x:Key="ControlBackground" Color="#FFFFFF"/>
     <SolidColorBrush x:Key="ControlHover" Color="#F3F4F6"/>
     <SolidColorBrush x:Key="ControlPressed" Color="#E1E4E8"/>
-    <SolidColorBrush x:Key="ControlBorder" Color="#D0D7DE"/>
+    <SolidColorBrush x:Key="ControlBorder" Color="#BFC6CD"/>
     <SolidColorBrush x:Key="InputBackground" Color="#FFFFFF"/>
     <SolidColorBrush x:Key="InputBorder" Color="#C9D1D9"/>
     <SolidColorBrush x:Key="SelectionBackground" Color="#DDF4FF"/>

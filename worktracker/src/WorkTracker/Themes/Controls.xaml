@@ -276,7 +276,7 @@
             <Setter.Value>
                 <ControlTemplate TargetType="MenuItem">
                     <Grid x:Name="Root">
-                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="3"/>
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" CornerRadius="3"/>
                         <Grid Margin="8,4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" MinWidth="130"/>

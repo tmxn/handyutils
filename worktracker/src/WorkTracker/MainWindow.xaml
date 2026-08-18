@@ -4,7 +4,7 @@
         Title="WorkTracker" Height="900" Width="1400" Icon="icon.ico"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBackground}" Foreground="{DynamicResource TextPrimary}">
-    <DockPanel Margin="8">
+    <DockPanel Margin="0" Background="{DynamicResource WindowBackground}">
 
         <!-- Toolbar -->
         <Border DockPanel.Dock="Top" Padding="6" Margin="0,0,0,8"
@@ -56,11 +56,11 @@
                 <ColumnDefinition Width="3*"/>
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0" BorderBrush="{DynamicResource PanelBorderBrush}" BorderThickness="1" Padding="12">
+            <Border Grid.Column="0" BorderBrush="{DynamicResource PanelBorderBrush}" BorderThickness="1" Padding="12" Background="{DynamicResource WindowBackground}">
                 <Grid x:Name="GridHost" HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
 
-            <Border Grid.Column="2" BorderBrush="{DynamicResource PanelBorderBrush}" BorderThickness="1">
+            <Border Grid.Column="2" BorderBrush="{DynamicResource PanelBorderBrush}" BorderThickness="1" Background="{DynamicResource WindowBackground}">
                 <ContentControl x:Name="DetailHost"/>
             </Border>
         </Grid>
