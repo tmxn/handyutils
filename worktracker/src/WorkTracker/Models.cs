@@ -45,8 +45,9 @@ public sealed class LlmSettings
 
 public sealed class GridSettings
 {
-    // 5 cutoffs producing 6 steps (step 0 = empty).
-    public List<int> LoadThresholds { get; set; } = new() { 0, 1, 10, 20, 35 };
+    // 10 cutoffs producing 11 steps (step 0 = empty). Green steps up to 24,
+    // cyan from 25+, deep cyan from 30+.
+    public List<int> LoadThresholds { get; set; } = new() { 0, 1, 4, 7, 10, 13, 16, 20, 25, 30 };
 }
 
 public sealed class AppConfig

@@ -11,7 +11,7 @@ namespace WorkTracker.Services;
 /// </summary>
 public sealed class ScoreService
 {
-    public const int PromptVersion = 6;
+    public const int PromptVersion = 7;
     public const int MaxCommitsPerBatch = 15;
 
     // Diff triage: commits this large get a cheap pre-check (file list + short diff
@@ -328,6 +328,7 @@ public sealed class ScoreService
         sb.AppendLine();
         sb.AppendLine("RULES:");
         sb.AppendLine("- Score the effort and complexity actually involved, not the size of the diff. A one-line fix of a subtle concurrency bug scores higher than 300 lines of generated or boilerplate changes.");
+        sb.AppendLine("- Trivial one-line changes (flipping a boolean/return value, changing a constant or config value, updating a comment) score 2-3, even when a long explanatory comment is attached or the behavior being toggled matters — score the work the author did, not the importance of the outcome. An explanatory comment does not turn a one-liner into hard work.");
         sb.AppendLine("- Mechanical work (formatting, renames, dependency bumps, generated code) scores low.");
         sb.AppendLine("- Reverts are real work: score the effort of the revert plus the diagnosis it implies, and note in the comment that it is a revert.");
         sb.AppendLine("- Some commits are marked [triaged as mechanical]: a pre-check judged the change mechanical (e.g., dependency bumps, generated code, bulk renames), so their full diff is withheld. Score only the work such a commit implies, using the file list and diff sample — mechanical work scores low.");

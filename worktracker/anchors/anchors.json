@@ -1,11 +1,11 @@
 {
-  "anchorVersion": 1,
+  "anchorVersion": 2,
   "_comment": "PLACEHOLDER — Milestone 5 (anchor baking): replace the three diffs with real commits selected from the configured repo and reviewed with the user. Until then, scoring will run against synthetic exemplars and scores should be considered uncalibrated.",
   "anchors": [
     {
       "id": "low",
       "targetScore": 2,
-      "note": "Single-line config value change, no behavioral risk.",
+      "note": "Trivial one-line change with no behavioral risk: a config value, constant, or a single boolean/return flip (with or without an explanatory comment). This class of change scores 2-3.",
       "diff": "diff --git a/config/appsettings.Production.json b/config/appsettings.Production.json\nindex 1a2b3c4..5d6e7f8 100644\n--- a/config/appsettings.Production.json\n+++ b/config/appsettings.Production.json\n@@ -12,7 +12,7 @@\n   \"Logging\": {\n     \"LogLevel\": {\n       \"Default\": \"Information\",\n-      \"Microsoft.AspNetCore\": \"Warning\"\n+      \"Microsoft.AspNetCore\": \"Information\"\n     }\n   }\n }"
     },
     {

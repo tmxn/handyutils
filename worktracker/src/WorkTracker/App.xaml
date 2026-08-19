@@ -11,13 +11,20 @@
                 <ResourceDictionary Source="Themes/Controls.xaml"/>
             </ResourceDictionary.MergedDictionaries>
 
-            <!-- GitHub-style green ramp for the load scale (steps 0..5; 5 = very high, load >= 35) -->
+            <!-- Load ramp (steps 0..10): green steps for normal days, switching to
+                 cyan for high load (full cyan at 25+, deep cyan at 30+) so lows and
+                 highs are clearly distinguishable -->
             <SolidColorBrush x:Key="Load0" Color="#E1E4E8"/>
-            <SolidColorBrush x:Key="Load1" Color="#9BE9A8"/>
-            <SolidColorBrush x:Key="Load2" Color="#40C463"/>
-            <SolidColorBrush x:Key="Load3" Color="#30A14E"/>
-            <SolidColorBrush x:Key="Load4" Color="#216E39"/>
-            <SolidColorBrush x:Key="Load5" Color="#1A5532"/>
+            <SolidColorBrush x:Key="Load1" Color="#C9F2CC"/>
+            <SolidColorBrush x:Key="Load2" Color="#9FE3A8"/>
+            <SolidColorBrush x:Key="Load3" Color="#6FCF85"/>
+            <SolidColorBrush x:Key="Load4" Color="#40C463"/>
+            <SolidColorBrush x:Key="Load5" Color="#1FA34A"/>
+            <SolidColorBrush x:Key="Load6" Color="#15803D"/>
+            <SolidColorBrush x:Key="Load7" Color="#0F5A2E"/>
+            <SolidColorBrush x:Key="Load8" Color="#147D54"/>
+            <SolidColorBrush x:Key="Load9" Color="#00B8D4"/>
+            <SolidColorBrush x:Key="Load10" Color="#00779B"/>
 
             <!-- Neutral hatch for cells with only unscored commits (colors follow the theme) -->
             <DrawingBrush x:Key="UnscoredBrush" TileMode="Tile"

@@ -69,8 +69,10 @@ public sealed class ConfigStore
         if (string.IsNullOrWhiteSpace(cfg.Llm.LlamaModel)) cfg.Llm.LlamaModel = "any";
         if (string.IsNullOrWhiteSpace(cfg.Llm.LlamaThinkingLevel)) cfg.Llm.LlamaThinkingLevel = "low";
         cfg.Grid ??= new GridSettings();
-        if (cfg.Grid.LoadThresholds == null || cfg.Grid.LoadThresholds.Count != 5)
-            cfg.Grid.LoadThresholds = new List<int> { 0, 1, 10, 20, 35 };
+        // Old configs have 5 cutoffs; the grid now uses 10 cutoffs → 11 steps,
+        // so any non-10 value list (default or customized) is replaced.
+        if (cfg.Grid.LoadThresholds == null || cfg.Grid.LoadThresholds.Count != 10)
+            cfg.Grid.LoadThresholds = new List<int> { 0, 1, 4, 7, 10, 13, 16, 20, 25, 30 };
         if (string.IsNullOrWhiteSpace(cfg.Theme))
             cfg.Theme = "auto";
         if (string.IsNullOrWhiteSpace(cfg.Llm.ThinkingEffort))

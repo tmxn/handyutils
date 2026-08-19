@@ -76,7 +76,7 @@
             </StackPanel>
 
             <!-- Load thresholds -->
-            <TextBlock Text="Grid load thresholds (5 cutoffs → 6 color steps)" FontWeight="Bold"
+            <TextBlock Text="Grid load thresholds (10 cutoffs → 11 color steps)" FontWeight="Bold"
                        FontSize="13" Margin="0,4,0,6"/>
             <StackPanel x:Name="ThresholdsPanel" Orientation="Horizontal" Margin="0,0,0,10"/>
 
