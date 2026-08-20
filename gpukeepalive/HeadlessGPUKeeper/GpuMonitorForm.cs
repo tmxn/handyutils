@@ -1,5 +1,7 @@
 using System.Drawing;
 using System.Runtime.InteropServices;
+using System.Net.Http.Json;
+using System.Text.Json;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
@@ -14,6 +16,7 @@ namespace HeadlessGpuKeeper;
 public sealed class GpuMonitorForm : Form
 {
     const string RegPath = @"Software\HeadlessGPUKeeper";
+    const string LlamaBase = "http://localhost:8080";
 
     // Linger (after llama-server exits) until the adapter's dedicated usage is back
     // at this idle baseline plus a short tail, so the freed VRAM is actually visible.
@@ -30,10 +33,15 @@ public sealed class GpuMonitorForm : Form
 
     readonly KeeperCore _core;
     readonly System.Windows.Forms.Timer _timer;
+    readonly HttpClient _llamaClient = new() { Timeout = TimeSpan.FromSeconds(1) };
 
     ContextMenuStrip _gpuMenu = null!;
     Label _vramLabel = null!;
+    Label _modelLabel = null!;
+    Label _ctxLabel = null!;
     ProgressBar _loadBar = null!;
+    string? _modelName;
+    bool _polling;
 
     GpuInfo[] _gpus = Array.Empty<GpuInfo>();
     GpuMonitor? _monitor;
@@ -92,28 +100,53 @@ public sealed class GpuMonitorForm : Form
                 _gpuMenu.Show(Cursor.Position);
         };
 
+        // Model file name: small font so most names fit on two rows of the 21px height.
+        _modelLabel = new Label
+        {
+            AutoSize = false,
+            Width = 64,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Location = new Point(64, 0),
+            ForeColor = Color.LightGray,
+            Font = new Font("Segoe UI", 6F)
+        };
+
+        _ctxLabel = new Label
+        {
+            AutoSize = false,
+            Width = 102,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Location = new Point(129, 0),
+            ForeColor = Color.White,
+            Font = new Font("Segoe UI", 8F)
+        };
+
         _loadBar = new ProgressBar
         {
             Minimum = 0,
             Maximum = 100,
             Value = 0,
             Width = 61,
-            Height = 19,
-            Location = new Point(64, 1),
+            Height = 24,
+            Location = new Point(232, 1),
             Style = ProgressBarStyle.Continuous
         };
 
-        Controls.AddRange(new Control[] { _vramLabel, _loadBar });
+        Controls.AddRange(new Control[] { _vramLabel, _modelLabel, _ctxLabel, _loadBar });
 
-        // Hug the content exactly: fixed 21px row height, form trimmed to the content.
+        // Hug the content exactly: fixed 26px row height, form trimmed to the content.
         // The progress bar is inset by 1px on every side so it reads smaller than the text.
-        int h = 21;
+        int h = 26;
         _vramLabel.Height = h;
-        _loadBar.Height = 19;
+        _modelLabel.Height = h;
+        _ctxLabel.Height = h;
+        _loadBar.Height = 24;
         ClientSize = new Size(_loadBar.Right + 1, h);
 
         AttachDrag(this);
         AttachDrag(_loadBar);
+        AttachDrag(_modelLabel);
+        AttachDrag(_ctxLabel);
 
         ResumeLayout();
     }
@@ -238,6 +271,9 @@ public sealed class GpuMonitorForm : Form
             _monitor?.Enable();
             (vramMb, loadPercent) = _monitor?.Sample() ?? (0, 0);
             coreVram = vramMb;
+            // Poll llama-server alongside the VRAM read; stops when the form hides.
+            if (!_polling)
+                _ = PollLlamaAsync();
         }
 
         bool active = _core.Tick(coreVram) == KeeperCore.ModeActive;
@@ -275,18 +311,71 @@ public sealed class GpuMonitorForm : Form
         }
     }
 
+    async Task PollLlamaAsync()
+    {
+        _polling = true;
+        try
+        {
+            // Model path is stable for the server's lifetime: fetch it once, keep the name.
+            if (_modelName == null)
+            {
+                JsonElement props;
+                try
+                {
+                    props = await _llamaClient.GetFromJsonAsync<JsonElement>(LlamaBase + "/props");
+                }
+                catch
+                {
+                    return; // server gone (or /props failed): no point hitting /slots
+                }
+
+                if (props.TryGetProperty("model_path", out var mp) && mp.ValueKind == JsonValueKind.String && mp.GetString() is { } path)
+                    _modelName = Path.GetFileName(path);
+
+                if (_modelName == null)
+                    _modelName = ""; // don't re-hit /props on every tick
+                if (!string.IsNullOrEmpty(_modelName))
+                    _modelLabel.Text = _modelName!;
+            }
+
+            JsonElement[] slots = await _llamaClient.GetFromJsonAsync<JsonElement[]>(LlamaBase + "/slots");
+            if (slots.Length > 0)
+            {
+                var slot = slots[0];
+                long ctx = slot.TryGetProperty("n_ctx", out var c) ? c.GetInt64() : 0;
+                long used = slot.TryGetProperty("n_prompt_tokens", out var t) ? t.GetInt64() : 0;
+                if (ctx > 0)
+                    _ctxLabel.Text = $"{FormatK(used)}/{FormatK(ctx)}";
+            }
+        }
+        catch
+        {
+            // llama-server no longer reachable: the form hides on its own via the VRAM logic.
+        }
+        finally
+        {
+            _polling = false;
+        }
+    }
+
     static string FormatVram(double mb)
         => mb >= 1024 ? $"{mb / 1024.0:F1} GB" : $"{mb:F0} MB";
+
+    // 950 -> "950", 6500 -> "6.5k", 128000 -> "128k"
+    static string FormatK(long v)
+        => v < 1000 ? v.ToString() : $"{(double)v / 1000.0:0.##}k";
 
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
 
         // Re-hug after WinForms' first-show layout may have inflated the form size.
-        int h = 21;
+        int h = 26;
         _vramLabel.Height = h;
-        _loadBar.Location = new Point(64, 1);
-        _loadBar.Height = 19;
+        _modelLabel.Height = h;
+        _ctxLabel.Height = h;
+        _loadBar.Location = new Point(232, 1);
+        _loadBar.Height = 24;
         var sz = new Size(_loadBar.Right + 1, h);
         MinimumSize = sz;
         MaximumSize = sz;
