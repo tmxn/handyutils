@@ -17,6 +17,8 @@ public sealed class GpuMonitorForm : Form
 {
     const string RegPath = @"Software\HeadlessGPUKeeper";
     const string LlamaBase = "http://localhost:8080";
+    const string DefaultModelText = "Loading Model..";
+    const string DefaultCtxText = "..../..";
 
     // Linger (after llama-server exits) until the adapter's dedicated usage is back
     // at this idle baseline plus a short tail, so the freed VRAM is actually visible.
@@ -41,6 +43,7 @@ public sealed class GpuMonitorForm : Form
     Label _ctxLabel = null!;
     ProgressBar _loadBar = null!;
     string? _modelName;
+    long _lastCtx = -1;
     bool _polling;
 
     GpuInfo[] _gpus = Array.Empty<GpuInfo>();
@@ -100,7 +103,7 @@ public sealed class GpuMonitorForm : Form
                 _gpuMenu.Show(Cursor.Position);
         };
 
-        // Model file name: small font so most names fit on two rows of the 21px height.
+        // Model file name: small font so most names fit on two rows of the 26px height.
         _modelLabel = new Label
         {
             AutoSize = false,
@@ -108,7 +111,8 @@ public sealed class GpuMonitorForm : Form
             TextAlign = ContentAlignment.MiddleCenter,
             Location = new Point(64, 0),
             ForeColor = Color.LightGray,
-            Font = new Font("Segoe UI", 6F)
+            Font = new Font("Segoe UI", 6F),
+            Text = DefaultModelText
         };
 
         _ctxLabel = new Label
@@ -118,7 +122,8 @@ public sealed class GpuMonitorForm : Form
             TextAlign = ContentAlignment.MiddleCenter,
             Location = new Point(129, 0),
             ForeColor = Color.White,
-            Font = new Font("Segoe UI", 8F)
+            Font = new Font("Segoe UI", 8F),
+            Text = DefaultCtxText
         };
 
         _loadBar = new ProgressBar
@@ -316,46 +321,60 @@ public sealed class GpuMonitorForm : Form
         _polling = true;
         try
         {
-            // Model path is stable for the server's lifetime: fetch it once, keep the name.
-            if (_modelName == null)
-            {
-                JsonElement props;
-                try
-                {
-                    props = await _llamaClient.GetFromJsonAsync<JsonElement>(LlamaBase + "/props");
-                }
-                catch
-                {
-                    return; // server gone (or /props failed): no point hitting /slots
-                }
-
-                if (props.TryGetProperty("model_path", out var mp) && mp.ValueKind == JsonValueKind.String && mp.GetString() is { } path)
-                    _modelName = Path.GetFileName(path);
-
-                if (_modelName == null)
-                    _modelName = ""; // don't re-hit /props on every tick
-                if (!string.IsNullOrEmpty(_modelName))
-                    _modelLabel.Text = _modelName!;
-            }
-
-            JsonElement[] slots = await _llamaClient.GetFromJsonAsync<JsonElement[]>(LlamaBase + "/slots");
-            if (slots.Length > 0)
+            var slots = await _llamaClient.GetFromJsonAsync<JsonElement[]>(LlamaBase + "/slots");
+            if (slots is { Length: > 0 })
             {
                 var slot = slots[0];
                 long ctx = slot.TryGetProperty("n_ctx", out var c) ? c.GetInt64() : 0;
                 long used = slot.TryGetProperty("n_prompt_tokens", out var t) ? t.GetInt64() : 0;
                 if (ctx > 0)
+                {
                     _ctxLabel.Text = $"{FormatK(used)}/{FormatK(ctx)}";
+
+                    // A different total context means a new model was loaded: refresh the name.
+                    bool modelChanged = ctx != _lastCtx;
+                    if (modelChanged)
+                        _lastCtx = ctx;
+
+                    if (_modelName is null or "" || modelChanged)
+                        _modelName = await FetchModelNameAsync() ?? _modelName ?? "";
+
+                    if (_modelName.Length > 0)
+                        _modelLabel.Text = _modelName;
+                }
             }
         }
         catch
         {
-            // llama-server no longer reachable: the form hides on its own via the VRAM logic.
+            // llama-server is gone (the form may linger for a while): drop the stale info.
+            _modelName = null;
+            _lastCtx = -1;
+            _modelLabel.Text = DefaultModelText;
+            _ctxLabel.Text = DefaultCtxText;
         }
         finally
         {
             _polling = false;
         }
+    }
+
+    // Returns the model file name, "" if /props is reachable but has no usable
+    // model_path (so it isn't re-fetched), or null if the server is unreachable.
+    async Task<string?> FetchModelNameAsync()
+    {
+        JsonElement props;
+        try
+        {
+            props = await _llamaClient.GetFromJsonAsync<JsonElement>(LlamaBase + "/props");
+        }
+        catch
+        {
+            return null;
+        }
+
+        if (props.TryGetProperty("model_path", out var mp) && mp.ValueKind == JsonValueKind.String && mp.GetString() is { } path)
+            return Path.GetFileName(path);
+        return "";
     }
 
     static string FormatVram(double mb)
