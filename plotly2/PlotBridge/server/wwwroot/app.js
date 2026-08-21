@@ -144,6 +144,12 @@ function setStatus(cls, text) {
 
 function handle(msg) {
   switch (msg.type) {
+    // Fire-and-forget: the reply goes back over HTTP, not the socket, because the
+    // payload is image bytes and the waiting request is an HTTP request.
+    case 'render':
+      renderToImage(msg);
+      return;
+
     case 'snapshot': {
       clientId = msg.clientId;
       state = msg.board || { name: BOARD, charts: [] };
@@ -447,6 +453,48 @@ function resolve3d(chart) {
   return chart.series.some((s) => s.z && s.z.length);
 }
 
+// Everything the on-screen plot and an exported image must agree on: axis styling,
+// fonts, legend, aspect. The two then diverge deliberately — the page layers view
+// state on top (uirevision, held zoom, drag mode), an export layers on a camera and
+// always autoranges. Sharing this much is what keeps a PNG looking like the page.
+function baseLayout(c, is3d, th) {
+  const axis = (title) => ({
+    title: { text: title, font: { color: th.muted } },
+    gridcolor: th.grid,
+    zerolinecolor: th.baseline,
+    linecolor: th.baseline,
+    tickfont: { color: th.muted },
+  });
+
+  const layout = {
+    margin: is3d ? { l: 0, r: 0, t: 8, b: 0 } : { l: 58, r: 16, t: 10, b: 46 },
+    paper_bgcolor: th.surface,
+    plot_bgcolor: th.surface,
+    font: { family: 'system-ui, -apple-system, "Segoe UI", sans-serif', size: 11, color: th.text2 },
+    hovermode: 'closest',
+    // Identity is never colour-alone: the legend is always present for >= 2
+    // series, and each entry carries the marker shape as well as the hue.
+    showlegend: c.series.length >= 2,
+    legend: { orientation: 'h', y: -0.1, font: { color: th.text2 }, bgcolor: 'rgba(0,0,0,0)' },
+  };
+
+  if (is3d) {
+    layout.scene = {
+      xaxis: axis('x'),
+      yaxis: axis('y'),
+      zaxis: axis('z'),
+      aspectmode: c.uniform ? 'data' : 'auto',
+      bgcolor: th.surface,
+    };
+  } else {
+    layout.xaxis = axis('x');
+    layout.yaxis = axis('y');
+    if (c.uniform) { layout.yaxis.scaleanchor = 'x'; layout.yaxis.scaleratio = 1; }
+  }
+
+  return layout;
+}
+
 function renderPlot() {
   const c = active();
   const div = $('plot');
@@ -460,44 +508,16 @@ function renderPlot() {
   const th = chrome();
   const traces = c.series.map((s) => traceFor(s, is3d));
 
-  const axis = (title) => ({
-    title: { text: title, font: { color: th.muted } },
-    gridcolor: th.grid,
-    zerolinecolor: th.baseline,
-    linecolor: th.baseline,
-    tickfont: { color: th.muted },
-  });
-
   const rev = `${c.name}|${is3d ? '3d' : '2d'}|${viewRev.get(c.name) || 0}`;
-  const layout = {
-    margin: is3d ? { l: 0, r: 0, t: 8, b: 0 } : { l: 58, r: 16, t: 10, b: 46 },
-    paper_bgcolor: th.surface,
-    plot_bgcolor: th.surface,
-    font: { family: 'system-ui, -apple-system, "Segoe UI", sans-serif', size: 11, color: th.text2 },
-    uirevision: rev,
-    hovermode: 'closest',
-    // Identity is never colour-alone: the legend is always present for >= 2
-    // series, and each entry carries the marker shape as well as the hue.
-    showlegend: c.series.length >= 2,
-    legend: { orientation: 'h', y: -0.1, font: { color: th.text2 }, bgcolor: 'rgba(0,0,0,0)' },
-  };
+  const layout = baseLayout(c, is3d, th);
+  layout.uirevision = rev;
 
   if (is3d) {
-    layout.scene = {
-      xaxis: axis('x'),
-      yaxis: axis('y'),
-      zaxis: axis('z'),
-      uirevision: rev,
-      aspectmode: c.uniform ? 'data' : 'auto',
-      bgcolor: th.surface,
-    };
+    layout.scene.uirevision = rev;
   } else {
-    layout.xaxis = axis('x');
-    layout.yaxis = axis('y');
     // Drag pans; the wheel already zooms (scrollZoom). Switching this on the
     // modebar still sticks, because uirevision preserves it.
     layout.dragmode = 'pan';
-    if (c.uniform) { layout.yaxis.scaleanchor = 'x'; layout.yaxis.scaleratio = 1; }
 
     // Binary and explicit: either the user owns the view or the data does.
     // Asking for autorange outright matters — on a uirevision change Plotly
@@ -550,6 +570,73 @@ function renderPlot() {
       renderAll();
       return false;   // we own visibility state; don't let Plotly also toggle it
     });
+  }
+}
+
+/* ------------------------------------------------------------------- rasterise */
+
+// Something outside the browser wants to look at a chart — a script, a CI step, an
+// agent that can read a PNG but cannot drive a mouse. Plotly rasterises in the
+// browser, so the work lands here.
+//
+// It renders into its own off-screen div rather than the visible one. That costs a
+// second Plotly instance for a moment, and buys the guarantee that a render never
+// steals the tab, camera or zoom of whoever is looking at the page.
+async function renderToImage(msg) {
+  const url = `/render/result?id=${encodeURIComponent(msg.id)}`;
+  const fail = (reason) =>
+    fetch(`${url}&error=${encodeURIComponent(reason)}`, { method: 'POST' }).catch(() => {});
+
+  const c = chartByName(msg.chart);
+  if (!c || !c.series.length) { fail(`chart '${msg.chart}' has nothing to draw`); return; }
+
+  // Detached is not enough: Plotly sizes axes from the laid-out box, and a div
+  // outside the document has no box. So it goes into the page, parked off-screen at
+  // the requested pixel size.
+  const shim = document.createElement('div');
+  shim.style.cssText =
+    `position:absolute;left:-10000px;top:0;width:${msg.width}px;height:${msg.height}px;`;
+  document.body.appendChild(shim);
+
+  try {
+    const is3d = resolve3d(c);
+    const layout = baseLayout(c, is3d, chrome());
+    layout.width = msg.width;
+    layout.height = msg.height;
+
+    // The eye vector is the whole point of rendering headless: it is how a caller
+    // that cannot drag the mouse still gets to look from somewhere useful. It only
+    // means anything in 3D, so the resolved mode goes back with the image and the
+    // caller can see why a requested eye had no effect.
+    if (is3d && (msg.eye || msg.up)) {
+      layout.scene.camera = {};
+      if (msg.eye) layout.scene.camera.eye = { x: msg.eye[0], y: msg.eye[1], z: msg.eye[2] };
+      if (msg.up) layout.scene.camera.up = { x: msg.up[0], y: msg.up[1], z: msg.up[2] };
+    }
+
+    const traces = c.series.map((s) => traceFor(s, is3d));
+    await Plotly.newPlot(shim, traces, layout, { staticPlot: true, displaylogo: false });
+
+    const dataUrl = await Plotly.toImage(shim, {
+      format: 'png',
+      width: msg.width,
+      height: msg.height,
+      scale: msg.scale || 1,
+    });
+
+    // Round-tripping the data URL through fetch is the shortest correct base64
+    // decode to a binary body — no manual atob/Uint8Array loop.
+    const blob = await (await fetch(dataUrl)).blob();
+    await fetch(`${url}&mode=${is3d ? '3d' : '2d'}`, {
+      method: 'POST',
+      body: blob,
+      headers: { 'Content-Type': 'image/png' },
+    });
+  } catch (err) {
+    fail(String((err && err.message) || err));
+  } finally {
+    Plotly.purge(shim);
+    shim.remove();
   }
 }
 

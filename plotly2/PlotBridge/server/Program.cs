@@ -67,6 +67,7 @@ Directory.CreateDirectory(dataDir);
 
 var store = new Store(dataDir, log);
 var hub = new Hub(log);
+var renders = new RenderBroker(log);
 
 var json = new JsonSerializerOptions
 {
@@ -259,6 +260,37 @@ app.MapGet("/boards", () => Results.Json(store.BoardNames()));
 
 app.MapGet("/snapshot", (string? board) => Results.Json(store.Snapshot(board ?? "default"), json));
 
+// Data back out, as text. /snapshot already returns the whole board as JSON, but
+// it returns the board's *storage* shape; this filters to a chart or a series and
+// emits something a pipeline can chew on - long-form TSV for awk, or push-shaped
+// ndjson for jq. Nothing here needs a page to be open.
+app.MapGet("/export", (HttpResponse res, string? board, string? chart, string? series, string? format, string? download) =>
+{
+    if (!Export.TryParseFormat(format, out var fmt))
+        return Results.BadRequest(new { ok = false, error = $"unknown format '{format}' - use tsv, csv, json or ndjson" });
+
+    var snapshot = store.Snapshot(board ?? "default");
+    var body = Export.Render(snapshot, chart, series, fmt);
+
+    // A script that asked for a chart and got an empty body should be able to tell
+    // "no such chart" from "chart is empty" without parsing the payload.
+    var (nSeries, nPoints) = Export.Counts(snapshot, chart, series);
+    res.Headers["X-PlotBridge-Series"] = nSeries.ToString();
+    res.Headers["X-PlotBridge-Points"] = nPoints.ToString();
+
+    if (IsTruthy(download))
+    {
+        var stem = string.Join("-", new[] { snapshot.Name, chart, series }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        var name = new string(stem.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c).ToArray());
+        return Results.File(Encoding.UTF8.GetBytes(body), Export.ContentType(fmt), $"{name}.{Export.Extension(fmt)}");
+    }
+
+    return Results.Text(body, Export.ContentType(fmt));
+});
+
+static bool IsTruthy(string? v) =>
+    v is { Length: > 0 } && v != "0" && !v.Equals("false", StringComparison.OrdinalIgnoreCase);
+
 app.MapPost("/push", async (HttpRequest http) =>
 {
     PushRequest req;
@@ -313,6 +345,149 @@ app.MapPost("/clear", async (string? board, string? chart) =>
     await hub.BroadcastAsync(boardName, msg);
     return Results.Json(new { ok = true });
 });
+
+// ---- rasterising -------------------------------------------------------------
+// Plotly draws in the browser, so a PNG has to come from a page. This asks one
+// attached page to render offscreen and post the bytes back. No page attached is
+// a 503, not a hang: a script must not have to infer that from a timeout.
+app.MapGet("/render", async (HttpResponse res, string? board, string? chart, string? eye, string? up,
+                            int? width, int? height, double? scale, int? timeoutMs) =>
+{
+    var boardName = string.IsNullOrWhiteSpace(board) ? "default" : board.Trim();
+    var snapshot = store.Snapshot(boardName);
+
+    // Resolve the chart up front so a typo is a 404 naming the real charts, rather
+    // than a blank image that looks like a rendering bug.
+    var target = string.IsNullOrWhiteSpace(chart)
+        ? snapshot.Charts.FirstOrDefault()
+        : snapshot.Charts.FirstOrDefault(c => c.Name.Equals(chart.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    if (target is null)
+        return Results.NotFound(new
+        {
+            ok = false,
+            error = string.IsNullOrWhiteSpace(chart) ? $"board '{boardName}' has no charts" : $"no chart '{chart}' on board '{boardName}'",
+            charts = snapshot.Charts.Select(c => c.Name).ToArray(),
+        });
+
+    if (target.Series.Count == 0)
+        return Results.NotFound(new { ok = false, error = $"chart '{target.Name}' has no series to draw" });
+
+    if (!TryParseVector(eye, out var eyeVec, out var eyeErr))
+        return Results.BadRequest(new { ok = false, error = eyeErr });
+    if (!TryParseVector(up, out var upVec, out var upErr))
+        return Results.BadRequest(new { ok = false, error = upErr });
+
+    var (id, completion) = renders.Begin();
+    var sent = await hub.SendToAnyAsync(boardName, new
+    {
+        type = "render",
+        id,
+        chart = target.Name,
+        width = Math.Clamp(width ?? 1000, 64, 8000),
+        height = Math.Clamp(height ?? 750, 64, 8000),
+        scale = Math.Clamp(scale ?? 1.0, 0.1, 4.0),
+        eye = eyeVec,
+        up = upVec,
+    });
+
+    if (!sent)
+    {
+        renders.Abandon(id);
+        return Results.Json(new
+        {
+            ok = false,
+            error = $"no page attached to board '{boardName}' - open http://localhost:{port}/?board={Uri.EscapeDataString(boardName)} and retry",
+        }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+
+    var budget = Math.Clamp(timeoutMs ?? 15000, 500, 120000);
+    try
+    {
+        var done = await Task.WhenAny(completion, Task.Delay(budget));
+        if (done != completion)
+        {
+            renders.Abandon(id);
+            return Results.Json(new { ok = false, error = $"page did not return an image within {budget} ms" },
+                                statusCode: StatusCodes.Status504GatewayTimeout);
+        }
+
+        var result = await completion;
+        // An eye vector only bites in 3D. Reporting the mode the page actually
+        // resolved saves a caller from staring at a flat image wondering whether
+        // the camera argument was ignored or simply wrong.
+        if (result.Mode is { Length: > 0 }) res.Headers["X-PlotBridge-Mode"] = result.Mode;
+        return Results.File(result.Bytes, result.ContentType);
+    }
+    catch (InvalidOperationException ex)
+    {
+        // The page reported a real failure (e.g. Plotly threw) — pass the reason on.
+        return Results.Json(new { ok = false, error = ex.Message }, statusCode: StatusCodes.Status502BadGateway);
+    }
+});
+
+// The page posts raw image bytes back here, keyed by the id it was handed.
+app.MapPost("/render/result", async (HttpRequest http, string id, string? error, string? mode) =>
+{
+    if (string.IsNullOrWhiteSpace(id)) return Results.BadRequest(new { ok = false, error = "missing id" });
+
+    if (!string.IsNullOrWhiteSpace(error))
+        return Results.Json(new { ok = renders.Fail(id, error!) });
+
+    using var buffer = new MemoryStream();
+    await http.Body.CopyToAsync(buffer);
+    if (buffer.Length == 0) return Results.BadRequest(new { ok = false, error = "empty body" });
+
+    var contentType = string.IsNullOrWhiteSpace(http.ContentType) ? "image/png" : http.ContentType!;
+    // False means the id already timed out and was abandoned — worth saying so, but
+    // it is not an error on the page's part.
+    var accepted = renders.Complete(id, buffer.ToArray(), contentType, mode);
+    return Results.Json(new { ok = accepted, bytes = buffer.Length, stale = !accepted });
+});
+
+// Accepts "1,-2,0.5" or a named preset, and returns null for "not specified" so the
+// page keeps whatever camera it would have used.
+static bool TryParseVector(string? text, out double[]? vector, out string? error)
+{
+    vector = null;
+    error = null;
+    if (string.IsNullOrWhiteSpace(text)) return true;
+
+    var s = text.Trim().ToLowerInvariant();
+    // Presets in Plotly camera space: +z up, the data box roughly in the unit cube.
+    double[]? preset = s switch
+    {
+        "iso" or "isometric" => [1.25, 1.25, 1.25],
+        "front" => [0, -2.5, 0],
+        "back" => [0, 2.5, 0],
+        "right" or "side" => [2.5, 0, 0],
+        "left" => [-2.5, 0, 0],
+        "top" => [0, 0, 2.5],
+        "bottom" => [0, 0, -2.5],
+        _ => null,
+    };
+    if (preset is not null) { vector = preset; return true; }
+
+    var parts = s.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+    if (parts.Length != 3)
+    {
+        error = $"'{text}' is not a vector - use x,y,z or one of iso, front, back, left, right, top, bottom";
+        return false;
+    }
+
+    var v = new double[3];
+    for (var i = 0; i < 3; i++)
+    {
+        if (!double.TryParse(parts[i], System.Globalization.NumberStyles.Float,
+                             System.Globalization.CultureInfo.InvariantCulture, out v[i]))
+        {
+            error = $"'{parts[i]}' is not a number";
+            return false;
+        }
+    }
+    vector = v;
+    return true;
+}
 
 app.Map("/ws", async (HttpContext ctx, string? board) =>
 {

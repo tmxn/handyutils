@@ -218,6 +218,78 @@ From PowerShell, use the bundled sender rather than `ConvertTo-Json` (see
 .\PlotBridge\tools\Send-PlotBridge.ps1 -Series 'hull' -X $xs -Y $ys -Chart 'geometry'
 ```
 
+## Getting data out
+
+The mirror of the four ways in. Everything here works from a script, a shell or a
+CI step — no clicking, and (except for PNG) no page open.
+
+### Text, for a pipe or a file
+
+```bash
+curl "http://localhost:8777/export?chart=stage1&format=tsv" -o points.tsv
+```
+
+`format` is `tsv` (default), `csv`, `json` or `ndjson`. `board`, `chart` and
+`series` all filter and are all optional; `download=1` sends it as an attachment
+with a sensible filename.
+
+| Format | Shape | Reach for it when |
+|---|---|---|
+| `tsv` / `csv` | one row per point: `chart series i x y z` | awk, `Import-Csv`, pandas |
+| `ndjson` | one object per series | `jq` |
+| `json` | the same objects in an array | reading it yourself |
+
+Two response headers save a round trip: **`X-PlotBridge-Series`** and
+**`X-PlotBridge-Points`**. Zero series means the filter matched nothing; series
+with zero points means the chart is there but empty. An empty body alone cannot
+tell you which.
+
+**`ndjson` and `json` are shaped like `POST /push`,** so an export is a valid
+input — copying a chart between boards is a loop, not a conversion:
+
+```bash
+curl -s "http://localhost:8777/export?chart=stage1&format=ndjson" > series.ndjson
+```
+
+```bash
+while read -r s; do curl -s -X POST "http://localhost:8777/push?board=archive" -H "Content-Type: application/json" --data-binary "$s"; done < series.ndjson
+```
+
+The delimited formats deliberately do **not** round-trip: the leading
+`chart`/`series`/`i` columns would be read as coordinates by the tolerant text
+parser, which takes the first three numbers on a line. A 2D series leaves `z`
+empty rather than `0`, so "flat" and "no third dimension" stay distinguishable.
+
+### PNG, from any angle
+
+```bash
+curl "http://localhost:8777/render?chart=stage1&eye=iso&width=900&height=700" -o iso.png
+```
+
+`eye` is the point of the whole thing: it is how a caller that cannot drag a mouse
+still gets to look from somewhere useful. Give it `x,y,z` in Plotly camera space or
+a preset — `iso`, `front`, `back`, `left`, `right`, `top`, `bottom`. `up` takes the
+same forms. `width`, `height`, `scale` and `timeoutMs` do the obvious thing.
+
+The render happens in an **off-screen div on the page**, not the visible plot, so it
+never steals the tab, camera or zoom of whoever is watching — and the axis styling,
+palette, legend and equal-aspect handling come from the same `baseLayout` the
+on-screen plot uses, so the image matches the page.
+
+Failures are fast and say why, rather than timing out:
+
+| Status | Means |
+|---|---|
+| `503` | no page attached to that board — open it and retry |
+| `404` | no such chart (the response lists the ones that exist), or it has no series |
+| `400` | `eye`/`up` isn't a vector or a known preset |
+| `504` | the page didn't answer inside `timeoutMs` (default 15000) |
+| `502` | Plotly threw on the page; the reason is passed through |
+
+`X-PlotBridge-Mode` reports the dimensionality the page resolved. Worth reading
+when a camera argument seems ignored: **`eye` only bites in 3D**, and mode is
+auto-detected from whether the series carry `z`.
+
 ## Endpoints
 
 | Route | Purpose |
@@ -227,6 +299,9 @@ From PowerShell, use the bundled sender rather than `ConvertTo-Json` (see
 | `GET /snapshot?board=` | full board state as JSON |
 | `POST /push` | one series in; JSON or `text/plain` |
 | `POST /clear?board=&chart=` | clear one chart, or the whole board if `chart` is omitted |
+| `GET /export?board=&chart=&series=&format=` | data back out as tsv/csv/json/ndjson |
+| `GET /render?board=&chart=&eye=&width=&height=` | PNG, rendered by an attached page |
+| `POST /render/result?id=` | where the page posts the bytes back (internal) |
 | `GET /ws?board=` | WebSocket the pages listen on |
 
 ## The page

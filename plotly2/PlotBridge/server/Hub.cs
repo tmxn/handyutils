@@ -45,6 +45,23 @@ public sealed class Hub
         foreach (var c in targets) await SendRawAsync(c, payload);
     }
 
+    /// <summary>Sends to a single page on the board - for work exactly one page
+    /// should do, like rasterising a chart. Ordered by id so repeated requests keep
+    /// landing on the same page. Returns false when nothing is attached, which the
+    /// caller must surface rather than wait out.</summary>
+    public async Task<bool> SendToAnyAsync(string board, object message)
+    {
+        var target = _clients.Values
+            .Where(c => c.Board.Equals(board, StringComparison.OrdinalIgnoreCase)
+                        && c.Socket.State == WebSocketState.Open)
+            .OrderBy(c => c.Id, StringComparer.Ordinal)
+            .FirstOrDefault();
+
+        if (target is null) return false;
+        await SendAsync(target, message);
+        return true;
+    }
+
     public Task SendAsync(Client c, object message) =>
         SendRawAsync(c, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(message, Json)));
 
