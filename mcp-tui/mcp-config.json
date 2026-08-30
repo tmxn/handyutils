@@ -1,0 +1,37 @@
+{
+  "port": 9090,
+  "prefixTools": "auto",
+  "servers": [
+    {
+      "id": "file-system",
+      "name": "File Access",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "S:\\FastGitRoot\\appmain"
+      ],
+      "autostart": true
+    },
+    {
+      "id": "windows-desktop",
+      "name": "Desktop Control",
+      "command": "uvx",
+      "args": [
+        "windows-mcp",
+        "serve"
+      ],
+      "autostart": false
+    },
+    {
+      "id": "bash-shell",
+      "name": "Bash Execution",
+      "command": "npx",
+      "args": [
+        "-y",
+        "bash-mcp"
+      ],
+      "autostart": false
+    }
+  ]
+}

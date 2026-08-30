@@ -1,0 +1,27 @@
+{
+  "port": 19090,
+  "prefixTools": "auto",
+  "servers": [
+    {
+      "id": "toy-a",
+      "name": "Toy A",
+      "command": "node",
+      "args": ["test/toy-mcp-server.mjs", "A"],
+      "autostart": true
+    },
+    {
+      "id": "toy-b",
+      "name": "Toy B",
+      "command": "node",
+      "args": ["test/toy-mcp-server.mjs", "B"],
+      "autostart": true
+    },
+    {
+      "id": "toy-c",
+      "name": "Toy C (off)",
+      "command": "node",
+      "args": ["test/toy-mcp-server.mjs", "C"],
+      "autostart": false
+    }
+  ]
+}
