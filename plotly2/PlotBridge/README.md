@@ -159,9 +159,38 @@ and replace are remembered from the dialog. `askEveryTime=false` (or ticking
 
 ## Getting data in
 
-Four ways in, all equivalent once they land.
+Five ways in, all equivalent once they land - but only `/ingest` tells you when
+that happened.
+
+### Write a file and wait for it: `POST /ingest`
+
+The only way in that tells the caller when the data has landed. Use it from a
+script or a tool, where guessing is not an option:
+
+```
+POST /ingest?file=<absolute path, percent-encoded>
+```
+
+`file` repeats, so one request can carry a whole run. Only paths cross the wire —
+the server reads the files itself, so a large point set never becomes a large
+request body. That is safe because the server binds `127.0.0.1` only, so the caller
+is already local.
+
+The response does not come back until every file is in the store: **200** means
+`/export` and `/render` will see the data on the caller's next line, with no sleep
+and no re-polling. **400** lists what failed and why, per file, and says which of
+the others did land.
+
+Destination comes from each filename, the same `__` convention the drop folder uses.
+`board`, `chart` and `series` query parameters override it; `series` is refused
+alongside more than one file, because each would overwrite the last and the response
+would show one series with no hint the rest were swallowed.
 
 ### Drop a file
+
+Asynchronous, so a writer cannot tell whether its file was picked up. Fine from the
+Immediate Window, where a human is watching the page; use `/ingest` from anything
+that has to act on the result.
 
 Write a text file into `%LOCALAPPDATA%\PlotBridge\drop\`. The **filename picks
 the destination**, split on `__`:
@@ -298,6 +327,7 @@ auto-detected from whether the series carry `z`.
 | `GET /health` | port, data directory, known boards — the liveness probe |
 | `GET /snapshot?board=` | full board state as JSON |
 | `POST /push` | one series in; JSON or `text/plain` |
+| `POST /ingest?file=&board=&chart=&series=` | read files off disk, answering only once they are in the store |
 | `POST /clear?board=&chart=` | clear one chart, or the whole board if `chart` is omitted |
 | `GET /export?board=&chart=&series=&format=` | data back out as tsv/csv/json/ndjson |
 | `GET /render?board=&chart=&eye=&width=&height=` | PNG, rendered by an attached page |
@@ -402,7 +432,8 @@ PlotBridge/
     Models.cs         Board / Chart / Series / Style, PushRequest
     Store.cs          in-memory state + debounced JSON snapshots
     Hub.cs            WebSocket fan-out
-    DropWatcher.cs    drop-folder ingest
+    DropWatcher.cs    drop-folder watching (asynchronous)
+    Ingest.cs         the filename convention and file reading, shared
     TextPoints.cs     tolerant text -> coordinates
     wwwroot/          index.html, app.js, style.css, plotly.min.js
   vsix/

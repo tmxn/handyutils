@@ -7,10 +7,11 @@ namespace PlotBridge.Server;
 /// zero-tooling path: from the Visual Studio Immediate Window (or any script, or
 /// a shell redirect) write a file and the plot updates.
 ///
-/// Filename decides the destination, split on "__":
-///   <c>pts.tsv</c>                     -> board "default", chart "main",  series "pts"
-///   <c>hull__pts.tsv</c>               -> board "default", chart "hull",  series "pts"
-///   <c>run2__hull__pts.tsv</c>         -> board "run2",    chart "hull",  series "pts"
+/// Asynchronous by nature, so a writer cannot tell when - or whether - its file
+/// was picked up. A caller that needs to know should write the file and POST
+/// /ingest instead, which does not answer until the data is in the store.
+///
+/// Destination comes from the filename; see <see cref="Ingest.FromFileName"/>.
 /// </summary>
 public sealed class DropWatcher : IDisposable
 {
@@ -48,17 +49,10 @@ public sealed class DropWatcher : IDisposable
 
         _ = Task.Run(async () =>
         {
-            var text = await ReadWhenReadableAsync(path);
+            var text = await Ingest.ReadWhenReadableAsync(path);
             if (text is null) return;
 
-            var stem = Path.GetFileNameWithoutExtension(path);
-            var parts = stem.Split("__", StringSplitOptions.RemoveEmptyEntries);
-            var (board, chart, series) = parts.Length switch
-            {
-                >= 3 => (parts[0], parts[1], string.Join("__", parts.Skip(2))),
-                2 => ("default", parts[0], parts[1]),
-                _ => ("default", "main", stem),
-            };
+            var (board, chart, series) = Ingest.FromFileName(path);
 
             try
             {
@@ -77,30 +71,6 @@ public sealed class DropWatcher : IDisposable
                 _log.LogWarning("Drop ingest failed for {File}: {Message}", path, ex.Message);
             }
         });
-    }
-
-    /// <summary>The writer may still hold the file; retry briefly before giving up.</summary>
-    private static async Task<string?> ReadWhenReadableAsync(string path)
-    {
-        for (var attempt = 0; attempt < 12; attempt++)
-        {
-            try
-            {
-                if (!File.Exists(path)) return null;
-                using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                using var sr = new StreamReader(fs);
-                return await sr.ReadToEndAsync();
-            }
-            catch (IOException)
-            {
-                await Task.Delay(60);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                await Task.Delay(60);
-            }
-        }
-        return null;
     }
 
     public void Dispose() => _fsw.Dispose();

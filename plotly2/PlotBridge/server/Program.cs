@@ -328,6 +328,89 @@ app.MapPost("/push", async (HttpRequest http) =>
         : Results.BadRequest(new { ok, error = message });
 });
 
+// Synchronous counterpart to the drop folder: the caller writes files, names them
+// here, and this does not answer until every one of them is in the store. That is
+// the whole point - a client can act on the response instead of sleeping and
+// re-polling, which is what folder watching forces it to do.
+//
+// Only paths cross the wire, not contents: the server reads the files itself, so a
+// large point set never becomes a large request body. Safe because the server
+// binds 127.0.0.1 only, so the caller is already local.
+app.MapPost("/ingest", async (HttpRequest http) =>
+{
+    var files = http.Query["file"].Where(f => !string.IsNullOrWhiteSpace(f)).Select(f => f!).ToList();
+    if (files.Count == 0)
+        return Results.BadRequest(new { ok = false, error = "no file= given; pass one or more absolute paths" });
+
+    var board = http.Query["board"].FirstOrDefault();
+    var chart = http.Query["chart"].FirstOrDefault();
+    var series = http.Query["series"].FirstOrDefault();
+
+    // One series name cannot address several files: each would overwrite the last,
+    // leaving one series and no hint that the rest were swallowed.
+    if (!string.IsNullOrWhiteSpace(series) && files.Count > 1)
+        return Results.BadRequest(new
+        {
+            ok = false,
+            error = $"series= names one series but {files.Count} files were given; "
+                  + "let the filenames carry the series names",
+        });
+
+    var ingested = new List<object>();
+    var failed = new List<string>();
+
+    foreach (var file in files)
+    {
+        var name = Path.GetFileName(file);
+
+        if (!Path.IsPathRooted(file))
+        {
+            failed.Add($"{file}: path must be absolute - the server's working directory is not the caller's");
+            continue;
+        }
+
+        var full = Path.GetFullPath(file);
+        if (!File.Exists(full))
+        {
+            failed.Add($"{name}: no such file");
+            continue;
+        }
+
+        var text = await Ingest.ReadWhenReadableAsync(full);
+        if (text is null)
+        {
+            failed.Add($"{name}: could not be read - still held by its writer?");
+            continue;
+        }
+
+        var target = Ingest.FromFileName(full);
+        var req = new PushRequest
+        {
+            Board = string.IsNullOrWhiteSpace(board) ? target.Board : board,
+            Chart = string.IsNullOrWhiteSpace(chart) ? target.Chart : chart,
+            Series = string.IsNullOrWhiteSpace(series) ? target.Series : series,
+            Text = text,
+            Meta = new Dictionary<string, string> { ["source"] = "ingest", ["file"] = name },
+        };
+
+        var (ok, message, count) = await ApplyPushAsync(req);
+        if (!ok)
+        {
+            failed.Add($"{name}: {message}");
+            continue;
+        }
+
+        ingested.Add(new { file = name, board = req.Board, chart = req.Chart, series = req.Series, count });
+        log.LogInformation("Ingested {File} -> {Board}/{Chart}/{Series} ({Count} points)",
+            name, req.Board, req.Chart, req.Series, count);
+    }
+
+    if (failed.Count > 0)
+        return Results.BadRequest(new { ok = false, ingested, failed });
+
+    return Results.Json(new { ok = true, ingested });
+});
+
 app.MapPost("/clear", async (string? board, string? chart) =>
 {
     var boardName = string.IsNullOrWhiteSpace(board) ? "default" : board.Trim();
