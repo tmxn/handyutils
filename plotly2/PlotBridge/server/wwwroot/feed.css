@@ -1,0 +1,146 @@
+/* --------------------------------------------------------------- render feed
+   Layered on style.css, which owns the theme tokens and the top bar. Only what
+   the feed adds lives here. */
+
+.feedpage { overflow: hidden; }
+
+/* Every block below sets an explicit display, which outranks the hidden attribute's
+   own display:none - so hidden would be inert without this. */
+[hidden] { display: none !important; }
+
+.feed {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 14px;
+  align-content: start;
+  /* Cards keep their own height instead of stretching to the tallest in the row.
+     With stretch, a row sized before its images resolve leaves every shorter card
+     over-tall and clips the taller one against overflow:hidden. */
+  align-items: start;
+}
+
+.shot {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The newest render is the one being looked at, so say which one it is - after a
+   few arrive in a row the eye needs telling where the top of the list moved to. */
+.shot.newest { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+/* Natural aspect ratio: a render is worth seeing at the shape it was asked for.
+   The width/height attributes set in feed.js give the ratio before the bytes land,
+   so the row track is right on the first pass. */
+.shot-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--plane);
+  cursor: zoom-in;
+}
+
+.shot-fail {
+  padding: 22px 16px;
+  background: var(--plane);
+  color: var(--critical);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.shot-meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 7px 10px;
+  border-top: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.shot-meta .where {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color: var(--text-1);
+}
+
+.shot-meta .chip {
+  background: var(--wash);
+  border-radius: 4px;
+  padding: 0 5px;
+  color: var(--text-2);
+}
+
+.shot-meta .when {
+  margin-left: auto;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* style.css's .empty is an overlay for the plot pane (absolute, inset 0); here it
+   is the whole page's content, so it has to be laid out normally instead. */
+.feedempty {
+  position: static;
+  background: none;
+  flex: 1 1 auto;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  padding: 40px 24px;
+}
+.feedempty p { max-width: 52ch; margin-inline: auto; }
+
+/* ---------------------------------------------------------------- lightbox */
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: color-mix(in srgb, var(--plane) 88%, transparent);
+  backdrop-filter: blur(3px);
+  display: flex;
+  flex-direction: column;
+}
+
+.lightbox-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+}
+
+.lightbox-body {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 14px;
+  display: grid;
+  place-items: center;
+}
+
+/* Native size, scrolled if it does not fit: shrinking to the window is what the
+   card already does, and the reason to open one is to look closer. */
+.lightbox-body img { display: block; }
+
+/* style.css only dresses button.ghost; the lightbox's "open original" is a link. */
+a.ghost {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  font: inherit;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 3px 9px;
+  color: var(--text-2);
+}
+a.ghost:hover { background: var(--wash); color: var(--text-1); }

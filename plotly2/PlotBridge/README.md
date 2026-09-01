@@ -319,6 +319,26 @@ Failures are fast and say why, rather than timing out:
 when a camera argument seems ignored: **`eye` only bites in 3D**, and mode is
 auto-detected from whether the series carry `z`.
 
+### Watching what a caller renders: `/feed`
+
+Open <http://localhost:8777/feed> and leave it up. Every image `GET /render`
+produces appears there, newest first, and the page updates the moment one lands.
+
+This exists because `/render` is otherwise a closed loop: the PNG goes back to
+whoever asked for it and nowhere else, so a person sitting next to an automated
+caller sees the picture only if that caller volunteers a path and leaves the file
+behind. The feed removes the luck.
+
+Attempts that produced no image are listed too, with the reason — a render against
+a board with no page open is worth seeing, and an empty feed should mean "nothing
+was asked for", not "something failed quietly".
+
+The last ten are kept, in memory only; `PLOTBRIDGE_FEED_SIZE` changes the count.
+Nothing is written to disk, and a restart empties it — the point is to watch, not
+to archive. The page is a pure observer: it never opens a websocket, because board
+clients are the pool `/render` picks a rasteriser from, and a watcher with no plot
+of its own would be a bad one to pick.
+
 ## Endpoints
 
 | Route | Purpose |
@@ -332,6 +352,9 @@ auto-detected from whether the series carry `z`.
 | `GET /export?board=&chart=&series=&format=` | data back out as tsv/csv/json/ndjson |
 | `GET /render?board=&chart=&eye=&width=&height=` | PNG, rendered by an attached page |
 | `POST /render/result?id=` | where the page posts the bytes back (internal) |
+| `GET /feed` | the render feed page — the last few images `/render` produced |
+| `GET /feed/list?since=&waitMs=` | feed metadata as JSON; `since` blocks until it changes |
+| `GET /feed/img/{id}` | the bytes of one feed entry |
 | `GET /ws?board=` | WebSocket the pages listen on |
 
 ## The page

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PlotBridge — render feed</title>
+<link rel="stylesheet" href="style.css" />
+<link rel="stylesheet" href="feed.css" />
+</head>
+<body class="feedpage">
+
+<header class="topbar">
+  <span class="brand">PlotBridge</span>
+  <span class="board">render feed</span>
+  <span class="status" id="status"><i class="dot"></i><span id="statusText">connecting…</span></span>
+  <span class="muted" id="counts"></span>
+  <span class="spacer"></span>
+  <button id="themeBtn" class="ghost" title="Light / dark / follow system">theme: auto</button>
+</header>
+
+<main class="feed" id="feed"></main>
+
+<section class="empty feedempty" id="empty" hidden>
+  <h2>Nothing rendered yet</h2>
+  <p>Every image produced by <code>GET /render</code> appears here, newest first —
+     whether or not the caller kept the file. Attempts that failed show up too, so a
+     render against a board with no page open is visible rather than silent.</p>
+  <p class="muted">Held in memory only, and only the most recent <span id="capacity">10</span>.</p>
+</section>
+
+<div class="lightbox" id="lightbox" hidden>
+  <div class="lightbox-bar">
+    <strong id="lbTitle"></strong>
+    <span class="spacer"></span>
+    <a id="lbOpen" class="ghost" target="_blank" rel="noopener">open original</a>
+    <button id="lbClose" class="ghost">close</button>
+  </div>
+  <div class="lightbox-body" id="lbBody"></div>
+</div>
+
+<script src="feed.js"></script>
+</body>
+</html>

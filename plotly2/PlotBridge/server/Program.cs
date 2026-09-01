@@ -69,6 +69,13 @@ var store = new Store(dataDir, log);
 var hub = new Hub(log);
 var renders = new RenderBroker(log);
 
+// How many rendered images the feed page keeps. Ten is a comfortable screenful;
+// the override exists because "how far back can I look" is a personal preference.
+var feedSize = 10;
+if (Environment.GetEnvironmentVariable("PLOTBRIDGE_FEED_SIZE") is { Length: > 0 } fs
+    && int.TryParse(fs, out var fsv) && fsv > 0) feedSize = fsv;
+var feed = new RenderFeed(feedSize);
+
 var json = new JsonSerializerOptions
 {
     PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -254,6 +261,7 @@ app.MapGet("/health", () => Results.Json(new
     port,
     dataDir,
     boards = store.BoardNames(),
+    feed = new { url = $"http://localhost:{port}/feed", keeps = feed.Capacity },
 }));
 
 app.MapGet("/boards", () => Results.Json(store.BoardNames()));
@@ -461,15 +469,30 @@ app.MapGet("/render", async (HttpResponse res, string? board, string? chart, str
     if (!TryParseVector(up, out var upVec, out var upErr))
         return Results.BadRequest(new { ok = false, error = upErr });
 
+    var w = Math.Clamp(width ?? 1000, 64, 8000);
+    var h = Math.Clamp(height ?? 750, 64, 8000);
+    var sc = Math.Clamp(scale ?? 1.0, 0.1, 4.0);
+
     var (id, completion) = renders.Begin();
+
+    // Every attempt from here on is recorded, successful or not. The feed exists so
+    // a person can see what an automated caller asked for, and "asked and got
+    // nothing back" is precisely the case that otherwise leaves no trace anywhere.
+    // The raw eye/up text is kept rather than the parsed vector: "front" is what was
+    // asked for, and reads better than [0,-2.5,0].
+    void Record(byte[]? bytes, string contentType, string? mode, string? failure) =>
+        feed.Add(new RenderFeed.Shot(
+            id, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), boardName, target.Name,
+            eye, up, w, h, sc, mode, contentType, bytes, failure));
+
     var sent = await hub.SendToAnyAsync(boardName, new
     {
         type = "render",
         id,
         chart = target.Name,
-        width = Math.Clamp(width ?? 1000, 64, 8000),
-        height = Math.Clamp(height ?? 750, 64, 8000),
-        scale = Math.Clamp(scale ?? 1.0, 0.1, 4.0),
+        width = w,
+        height = h,
+        scale = sc,
         eye = eyeVec,
         up = upVec,
     });
@@ -477,11 +500,9 @@ app.MapGet("/render", async (HttpResponse res, string? board, string? chart, str
     if (!sent)
     {
         renders.Abandon(id);
-        return Results.Json(new
-        {
-            ok = false,
-            error = $"no page attached to board '{boardName}' - open http://localhost:{port}/?board={Uri.EscapeDataString(boardName)} and retry",
-        }, statusCode: StatusCodes.Status503ServiceUnavailable);
+        var why = $"no page attached to board '{boardName}' - open http://localhost:{port}/?board={Uri.EscapeDataString(boardName)} and retry";
+        Record(null, "image/png", null, why);
+        return Results.Json(new { ok = false, error = why }, statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 
     var budget = Math.Clamp(timeoutMs ?? 15000, 500, 120000);
@@ -491,7 +512,9 @@ app.MapGet("/render", async (HttpResponse res, string? board, string? chart, str
         if (done != completion)
         {
             renders.Abandon(id);
-            return Results.Json(new { ok = false, error = $"page did not return an image within {budget} ms" },
+            var why = $"page did not return an image within {budget} ms";
+            Record(null, "image/png", null, why);
+            return Results.Json(new { ok = false, error = why },
                                 statusCode: StatusCodes.Status504GatewayTimeout);
         }
 
@@ -500,11 +523,13 @@ app.MapGet("/render", async (HttpResponse res, string? board, string? chart, str
         // resolved saves a caller from staring at a flat image wondering whether
         // the camera argument was ignored or simply wrong.
         if (result.Mode is { Length: > 0 }) res.Headers["X-PlotBridge-Mode"] = result.Mode;
+        Record(result.Bytes, result.ContentType, result.Mode, null);
         return Results.File(result.Bytes, result.ContentType);
     }
     catch (InvalidOperationException ex)
     {
         // The page reported a real failure (e.g. Plotly threw) — pass the reason on.
+        Record(null, "image/png", null, ex.Message);
         return Results.Json(new { ok = false, error = ex.Message }, statusCode: StatusCodes.Status502BadGateway);
     }
 });
@@ -526,6 +551,70 @@ app.MapPost("/render/result", async (HttpRequest http, string id, string? error,
     // it is not an error on the page's part.
     var accepted = renders.Complete(id, buffer.ToArray(), contentType, mode);
     return Results.Json(new { ok = accepted, bytes = buffer.Length, stale = !accepted });
+});
+
+// ---- the render feed ---------------------------------------------------------
+// A rendered PNG normally goes to whoever asked for it and nowhere else, which
+// leaves the person sitting next to an automated caller blind: they see the image
+// only if the caller volunteers a path and leaves the file behind. These three
+// endpoints keep the last few renders visible on a page of their own.
+//
+// Note that the feed page does not open a websocket. Board clients are render
+// *candidates* - `SendToAnyAsync` picks one to rasterise - so a watcher that
+// attached like a normal page could be handed a render job it has no plot to
+// answer with. Long-polling keeps it a pure observer.
+
+app.MapGet("/feed", () =>
+{
+    var root = app.Environment.WebRootPath is { Length: > 0 } wr
+        ? wr
+        : Path.Combine(app.Environment.ContentRootPath, "wwwroot");
+    var page = Path.Combine(root, "feed.html");
+    return File.Exists(page)
+        ? Results.File(page, "text/html; charset=utf-8")
+        : Results.NotFound(new { ok = false, error = "feed.html is missing - is this a published build?" });
+});
+
+// Pass since= to block until the feed actually changes, so a new image appears the
+// moment it is rendered instead of on the next poll tick. Returning unchanged after
+// the budget is a normal answer: the caller just asks again.
+app.MapGet("/feed/list", async (HttpContext ctx, long? since, int? waitMs) =>
+{
+    if (since is { } mark)
+        await feed.WaitForChangeAsync(mark, TimeSpan.FromMilliseconds(Math.Clamp(waitMs ?? 25000, 0, 120000)), ctx.RequestAborted);
+
+    var (version, shots) = feed.List();
+    return Results.Json(new
+    {
+        version,
+        capacity = feed.Capacity,
+        shots = shots.Select(s => new
+        {
+            s.Id,
+            atMs = s.AtMs,
+            s.Board,
+            s.Chart,
+            s.Eye,
+            s.Up,
+            s.Width,
+            s.Height,
+            s.Scale,
+            s.Mode,
+            bytes = s.Bytes?.Length ?? 0,
+            s.Error,
+        }),
+    }, json);
+});
+
+app.MapGet("/feed/img/{id}", (HttpResponse res, string id) =>
+{
+    var shot = feed.Get(id);
+    if (shot?.Bytes is null) return Results.NotFound();
+
+    // An id names one attempt and its bytes never change, so the page can rebuild
+    // the whole list without refetching a single image.
+    res.Headers.CacheControl = "public, max-age=31536000, immutable";
+    return Results.File(shot.Bytes, shot.ContentType);
 });
 
 // Accepts "1,-2,0.5" or a named preset, and returns null for "not specified" so the
