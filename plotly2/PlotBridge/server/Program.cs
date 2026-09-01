@@ -268,6 +268,21 @@ app.MapGet("/boards", () => Results.Json(store.BoardNames()));
 
 app.MapGet("/snapshot", (string? board) => Results.Json(store.Snapshot(board ?? "default"), json));
 
+// Deleting is not clearing. POST /clear empties a board and leaves it listed and on
+// disk - right for starting a run over. This drops the board itself, so it stops
+// cluttering the picker. 404 rather than a silent ok, so a caller can tell a typo
+// from a deletion. Pages still attached are told, or they would sit showing data the
+// server no longer has.
+app.MapDelete("/boards", async (string? board) =>
+{
+    var name = (board ?? "").Trim();
+    if (name.Length == 0) return Results.BadRequest(new { ok = false, error = "board is required" });
+    if (!store.Delete(name)) return Results.NotFound(new { ok = false, error = $"no board named {name}" });
+
+    await hub.BroadcastAsync(name, new { type = "clearBoard" });
+    return Results.Json(new { ok = true, deleted = name });
+});
+
 // Data back out, as text. /snapshot already returns the whole board as JSON, but
 // it returns the board's *storage* shape; this filters to a chart or a series and
 // emits something a pipeline can chew on - long-form TSV for awk, or push-shaped

@@ -74,6 +74,39 @@ public sealed class Store
         lock (_gate) return _boards.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
+    /// <summary>Removes a board outright: out of memory, out of the pending-save
+    /// set, and off disk. Returns false when there was no such board.</summary>
+    ///
+    /// <remarks>Distinct from clearing it. Clearing empties the charts and leaves
+    /// the board listed and persisted, which is what you want between runs; this is
+    /// for a board you are finished with. A push that arrives afterwards recreates
+    /// it, which is the honest outcome - a board is only ever a name with data
+    /// under it.</remarks>
+    public bool Delete(string boardName)
+    {
+        string file;
+        lock (_gate)
+        {
+            if (string.IsNullOrWhiteSpace(boardName)) return false;
+            if (!_boards.Remove(boardName, out var board)) return false;
+            _dirty.Remove(board.Name);
+            // The stored name, not the caller's: lookups are case-insensitive, and the
+            // file on disk is named after the board as it was created.
+            file = Path.Combine(_dir, Sanitize(board.Name) + ".json");
+        }
+
+        // Outside the lock - file IO under the store gate would stall every push.
+        try
+        {
+            File.Delete(file);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning("Could not delete board file {File}: {Message}", file, ex.Message);
+        }
+        return true;
+    }
+
     private Board GetOrAddLocked(string name)
     {
         if (string.IsNullOrWhiteSpace(name)) name = "default";

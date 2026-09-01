@@ -791,3 +791,151 @@ fetch('health').then((r) => r.json()).then((h) => {
 }).catch(() => {});
 
 connect();
+
+/* ---------------------------------------------------------------- board picker
+   The board lives in the URL, and everything derived from it reads it from there:
+   the websocket, the curl snippet, and the address /render tells a caller to open
+   when it finds no page attached. So switching boards navigates rather than
+   swapping state in place - a soft switch would leave the address bar lying about
+   which board this page is a rasteriser for. */
+
+function closeBoardMenu() {
+  $('boardMenu').hidden = true;
+  $('boardBtn').setAttribute('aria-expanded', 'false');
+  disarmDelete();
+}
+
+function goToBoard(name) {
+  name = (name || '').trim();
+  if (!name) return;
+  if (name === BOARD) { closeBoardMenu(); return; }
+  location.search = '?board=' + encodeURIComponent(name);
+}
+
+/* Delete is two clicks, not a confirm() dialog: the first arms the button, the
+   second does it. A board holds a run's worth of data and the deletion reaches
+   disk, so it should not be one stray click away - but a modal for something this
+   small would be worse than the risk. */
+
+let armedDelete = null;
+
+function disarmDelete() {
+  if (!armedDelete) return;
+  armedDelete.textContent = '×';
+  armedDelete.classList.remove('armed');
+  armedDelete = null;
+}
+
+async function deleteBoard(name, row, button) {
+  let ok = false;
+  try {
+    const res = await fetch('boards?board=' + encodeURIComponent(name), { method: 'DELETE' });
+    ok = res.ok;
+  } catch { /* server down - say so on the button rather than vanishing the row */ }
+
+  if (!ok) {
+    button.textContent = 'failed';
+    button.classList.remove('armed');
+    button.classList.add('failed');
+    armedDelete = null;
+    return;
+  }
+
+  // The board being viewed keeps its row - it is still where this page is pointed,
+  // and the server's clearBoard broadcast has already emptied the plot behind the
+  // menu, which is the feedback that the delete landed.
+  if (name === BOARD) disarmDelete();
+  else row.remove();
+}
+
+function boardRow(name) {
+  const row = document.createElement('div');
+  row.className = 'brow';
+  if (name === BOARD) row.classList.add('current');
+
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'open';
+
+  const tick = document.createElement('span');
+  tick.className = 'tick';
+  tick.textContent = name === BOARD ? '✓' : '';
+
+  const nm = document.createElement('span');
+  nm.className = 'nm';
+  nm.textContent = name;
+
+  open.append(tick, nm);
+  open.onclick = () => goToBoard(name);
+
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'del';
+  del.textContent = '×';
+  del.title = 'Delete board ' + name;
+  del.onclick = () => {
+    if (del === armedDelete) { deleteBoard(name, row, del); return; }
+    disarmDelete();
+    armedDelete = del;
+    del.textContent = 'delete?';
+    del.classList.add('armed');
+  };
+
+  row.append(open, del);
+  return row;
+}
+
+async function openBoardMenu() {
+  const list = $('boardList');
+  disarmDelete();
+  list.replaceChildren();
+  $('boardMenu').hidden = false;
+  $('boardBtn').setAttribute('aria-expanded', 'true');
+  $('boardInput').value = '';
+  $('boardInput').focus();
+
+  // Fetched on every open rather than cached: a board springs into existence the
+  // moment something is pushed to it, which is usually while this page sits here
+  // watching a different one.
+  let names = [];
+  try { names = await (await fetch('boards')).json(); } catch { /* offline - still list ours */ }
+
+  // A board exists in the store only once it holds data, so the board this page is
+  // watching can legitimately be missing from that list.
+  const all = [...new Set([BOARD, ...names])]
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+
+  for (const name of all) list.append(boardRow(name));
+}
+
+$('boardBtn').onclick = () => {
+  if ($('boardMenu').hidden) openBoardMenu(); else closeBoardMenu();
+};
+
+$('boardForm').onsubmit = (e) => {
+  e.preventDefault();
+  goToBoard($('boardInput').value);
+};
+
+document.addEventListener('mousedown', (e) => {
+  // Anything but the armed button itself takes the arming back.
+  if (armedDelete && e.target !== armedDelete) disarmDelete();
+  if ($('boardMenu').hidden) return;
+  if (!$('boardMenu').contains(e.target) && !$('boardBtn').contains(e.target)) closeBoardMenu();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('boardMenu').hidden) closeBoardMenu();
+});
+
+// Enter opens the typed board, alongside the Open button. Handled on the key rather
+// than left to the form's implicit submission, so the field behaves the same however
+// the keystroke arrives.
+$('boardInput').onkeydown = (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  goToBoard($('boardInput').value);
+};
+
+// Carried across so the feed can offer a way back to this exact board.
+$('feedLink').href = 'feed?board=' + encodeURIComponent(BOARD);

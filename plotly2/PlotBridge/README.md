@@ -346,6 +346,7 @@ of its own would be a bad one to pick.
 | `GET /` | the board page; `?board=name` picks a board |
 | `GET /health` | port, data directory, known boards — the liveness probe |
 | `GET /snapshot?board=` | full board state as JSON |
+| `DELETE /boards?board=` | delete a board: out of the list, off disk; 404 if there is no such board |
 | `POST /push` | one series in; JSON or `text/plain` |
 | `POST /ingest?file=&board=&chart=&series=` | read files off disk, answering only once they are in the store |
 | `POST /clear?board=&chart=` | clear one chart, or the whole board if `chart` is omitted |
@@ -359,6 +360,16 @@ of its own would be a bad one to pick.
 
 ## The page
 
+- **Board picker.** Click the board name in the top bar for the list of boards the
+  server holds, or type a name to open one that does not exist yet. Choosing a
+  board navigates, so the address bar always names the board on screen - which
+  matters, because that is the URL `/render` asks a caller to open.
+  Each row has a delete button, two clicks: the first arms it, the second removes
+  the board from the list and its snapshot from disk. Clearing a board and deleting
+  one are different things - `POST /clear` empties the charts and keeps the board.
+- **Render feed link.** *render feed* in the top bar goes to `/feed`, and carries
+  the current board so the way back lands where you left. Each feed entry names the
+  board it was rendered from and links to it.
 - **Charts as tabs.** Push to a new chart name and a tab appears. *Follow
   pushes* jumps to whichever chart just received data; turn it off to stay put.
 - **Views survive updates.** Once you zoom, pan or rotate, re-pushing at every

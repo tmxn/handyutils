@@ -88,6 +88,114 @@ body {
 
 .spacer { flex: 1 1 auto; }
 
+/* The board name is the page's identity, so it doubles as the switcher: click the
+   pill, get the list. Styled to stay a pill rather than look like a button, since
+   it is a label first and a control second. */
+
+.boardpick { position: relative; display: inline-flex; }
+
+button.board {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-color: transparent;
+  padding: 1px 6px;
+}
+button.board:hover { border-color: var(--baseline); background: var(--wash); }
+button.board[aria-expanded="true"] { border-color: var(--accent); }
+
+.caret {
+  width: 0; height: 0;
+  border-left: 3.5px solid transparent;
+  border-right: 3.5px solid transparent;
+  border-top: 4px solid var(--muted);
+}
+
+.boardmenu {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 60;
+  min-width: 200px;
+  max-width: 320px;
+  padding: 6px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.boardmenu-head {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 6px 5px;
+}
+
+.boardmenu-list { max-height: 40vh; overflow: auto; }
+
+.brow { display: flex; align-items: center; gap: 2px; }
+
+.brow .open {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  border-color: transparent;
+  background: none;
+  text-align: left;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  padding: 4px 6px;
+}
+.brow .open:hover { background: var(--wash); }
+.brow.current .open { color: var(--accent); font-weight: 650; }
+.brow .tick { flex: 0 0 auto; width: 9px; color: var(--accent); }
+.brow .nm { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Visible at rest rather than revealed on hover: a control you cannot see is one
+   nobody finds, and low contrast is enough to keep it out of the way. */
+.brow .del {
+  flex: 0 0 auto;
+  border-color: transparent;
+  background: none;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 2px 6px;
+}
+.brow .del:hover { color: var(--critical); background: var(--wash); }
+.brow .del.armed {
+  background: var(--critical);
+  color: #fff;
+  font-size: 11px;
+  padding: 3px 6px;
+}
+.brow .del.failed { color: var(--critical); font-size: 11px; }
+
+.boardmenu-new {
+  display: flex;
+  gap: 5px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.boardmenu-new input { flex: 1 1 auto; min-width: 0; }
+
+/* Cross-page navigation: the plot board and the render feed each need a way to
+   reach the other, or the only route is remembering the URL. */
+
+.navlink {
+  color: var(--text-2);
+  text-decoration: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 3px 8px;
+}
+.navlink:hover { background: var(--wash); color: var(--text-1); border-color: var(--baseline); }
+
+
 .status { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); }
 
 .dot {

@@ -11,9 +11,22 @@
 
 <header class="topbar">
   <span class="brand">PlotBridge</span>
-  <span class="board" id="boardName">default</span>
+  <div class="boardpick">
+    <button class="board" id="boardBtn" aria-haspopup="true" aria-expanded="false"
+            title="Switch board"><span id="boardName">default</span><i class="caret"></i></button>
+    <div class="boardmenu" id="boardMenu" hidden>
+      <div class="boardmenu-head">Boards</div>
+      <div class="boardmenu-list" id="boardList"></div>
+      <form class="boardmenu-new" id="boardForm" autocomplete="off">
+        <input id="boardInput" type="text" placeholder="board name" spellcheck="false" />
+        <button class="primary" type="submit">Open</button>
+      </form>
+    </div>
+  </div>
   <span class="status" id="status"><i class="dot"></i><span id="statusText">connecting…</span></span>
   <span class="spacer"></span>
+  <a class="navlink" id="feedLink" href="feed"
+     title="Every image produced by /render, newest first">render feed</a>
   <label class="follow"><input type="checkbox" id="follow" checked /> follow pushes</label>
   <button id="themeBtn" class="ghost" title="Light / dark / follow system">theme: auto</button>
 </header>

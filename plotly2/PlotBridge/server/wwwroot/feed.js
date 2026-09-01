@@ -82,8 +82,12 @@ function card(shot) {
   const meta = document.createElement('div');
   meta.className = 'shot-meta';
 
-  const where = document.createElement('span');
+  // A link, not a label: seeing a render is usually the moment you want the live
+  // board it came from, and that board is not necessarily the one you arrived from.
+  const where = document.createElement('a');
   where.className = 'where';
+  where.href = '/?board=' + encodeURIComponent(shot.board);
+  where.title = 'Open board ' + shot.board;
   where.textContent = shot.board + ' / ' + shot.chart;
   meta.append(where);
 
@@ -209,3 +213,14 @@ async function watch() {
 }
 
 watch();
+
+/* ------------------------------------------------------------------ navigation
+   The plot page hands its board over in the query string, so the way back lands on
+   the board you left rather than on default. Arriving here cold (a bookmark, or
+   /health's feed url) has no board to return to, so the link stays generic. */
+
+const FROM_BOARD = new URLSearchParams(location.search).get('board') || '';
+if (FROM_BOARD) {
+  $('boardLink').href = '/?board=' + encodeURIComponent(FROM_BOARD);
+  $('boardLink').textContent = 'board ' + FROM_BOARD;
+}
