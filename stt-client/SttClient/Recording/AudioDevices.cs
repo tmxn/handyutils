@@ -21,7 +21,7 @@ public static class AudioDevices
     {
         var en = new MMDeviceEnumerator();
         return index is null
-            ? en.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications)
+            ? DefaultEndpoint(en, DataFlow.Capture)
             : ByIndex(en.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active), index, "capture");
     }
 
@@ -29,8 +29,23 @@ public static class AudioDevices
     {
         var en = new MMDeviceEnumerator();
         return index is null
-            ? en.GetDefaultAudioEndpoint(DataFlow.Render, Role.Communications)
+            ? DefaultEndpoint(en, DataFlow.Render)
             : ByIndex(en.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active), index, "render");
+    }
+
+    /// <summary>
+    /// The user's regular "Default Device" (Role.Console — what Windows shows with a
+    /// speaker icon), NOT the "Default Communication Device" (Role.Communications),
+    /// which can silently point at e.g. a headset while the default is the monitor.
+    /// </summary>
+    private static MMDevice DefaultEndpoint(MMDeviceEnumerator en, DataFlow flow)
+    {
+        try { return en.GetDefaultAudioEndpoint(flow, Role.Console); }
+        catch
+        {
+            // fall back to the communications default if the console default is missing
+            return en.GetDefaultAudioEndpoint(flow, Role.Communications);
+        }
     }
 
     private static MMDevice ByIndex(IEnumerable<MMDevice> devices, int? index, string kind)
@@ -48,9 +63,13 @@ public static class AudioDevices
         string? defaultId = null;
         try
         {
-            defaultId = en.GetDefaultAudioEndpoint(flow, Role.Communications).ID;
+            defaultId = en.GetDefaultAudioEndpoint(flow, Role.Console).ID;
         }
-        catch { /* no default for this flow */ }
+        catch
+        {
+            try { defaultId = en.GetDefaultAudioEndpoint(flow, Role.Communications).ID; }
+            catch { /* no default for this flow */ }
+        }
 
         var result = new List<DeviceInfo>();
         var i = 0;
@@ -61,6 +80,15 @@ public static class AudioDevices
             {
                 var mix = d.AudioClient.MixFormat;
                 format = $"{mix.SampleRate} Hz, {mix.BitsPerSample}-bit, {mix.Channels} ch";
+            }
+            catch { }
+            // Capture volume/mute is applied by the audio engine before apps see samples —
+            // a muted mic records silence, so make the state visible.
+            try
+            {
+                var vol = d.AudioEndpointVolume;
+                format += $", vol {vol.MasterVolumeLevelScalar:P0}";
+                if (vol.Mute) format += ", MUTED";
             }
             catch { }
             result.Add(new DeviceInfo(i++, d.FriendlyName, d.ID == defaultId, format));

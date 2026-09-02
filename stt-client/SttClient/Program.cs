@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using SttClient;
 using SttClient.Config;
 using SttClient.Recording;
 using SttClient.Stt;
@@ -8,11 +9,12 @@ using SttClient.Stt;
 
 var cliArgs = Environment.GetCommandLineArgs()[1..];
 var settings = Settings.Load();
+Log.Init(settings.OutputDir);
 
 if (cliArgs.Length == 0)
 {
-    PrintUsage();
-    return 1;
+    // No args → interactive TUI (also the friendly behavior when double-clicked).
+    return await SttClient.Tui.TuiApp.Run(settings);
 }
 
 switch (cliArgs[0].ToLowerInvariant())
@@ -27,6 +29,10 @@ switch (cliArgs[0].ToLowerInvariant())
         return CmdMeeting(settings, cliArgs[1..]);
     case "health":
         return await CmdHealth(settings);
+    case "check":
+        return await CmdCheck(settings);
+    case "tui":
+        return await SttClient.Tui.TuiApp.Run(settings);
     case "help":
     case "--help":
     case "-h":
@@ -45,6 +51,8 @@ static void PrintUsage()
     Console.WriteLine("""
         stt-client — record meetings (mic + speakers) and transcribe via WhisperX
 
+        Run with no arguments for the interactive TUI.
+
         Commands:
           devices                          list capture (mic) and render (loopback) devices
           record [--mic N] [--loopback N] [--out FILE]
@@ -54,6 +62,8 @@ static void PrintUsage()
                  Upload and transcribe. Writes <wav>.transcript.txt + .transcript.json
           meeting                          record → confirm → transcribe, in one flow
           health                           check the configured server
+          check                            self-check: server, devices, output dir
+          tui                              interactive terminal UI
         """);
 }
 
@@ -78,6 +88,48 @@ static async Task<int> CmdHealth(Settings settings)
     var health = await server.GetHealthAsync();
     Console.WriteLine($"{settings.ServerUrl} → {health}");
     return health == Health.Unreachable ? 1 : 0;
+}
+
+/// <summary>Startup self-check: configured URL + health, configured devices, output dir.</summary>
+static async Task<int> CmdCheck(Settings settings)
+{
+    var ok = true;
+    using var server = new SttServer(settings.ServerUrl);
+    var health = await server.GetHealthAsync();
+    Console.WriteLine($"Server   {settings.ServerUrl} → {health}");
+    Log.Write($"check: server {settings.ServerUrl} → {health}");
+    if (health == Health.Unreachable) ok = false;
+
+    try
+    {
+        var caps = AudioDevices.ListCaptures();
+        var name = settings.MicDevice is null ? "default"
+            : settings.MicDevice < caps.Count ? caps[(int)settings.MicDevice].Name : $"INDEX {settings.MicDevice} (out of range)";
+        if (settings.MicDevice >= caps.Count) ok = false;
+        Console.WriteLine($"Mic      {name}");
+
+        var renders = AudioDevices.ListRenders();
+        name = settings.LoopbackDevice is null ? "default"
+            : settings.LoopbackDevice < renders.Count ? renders[(int)settings.LoopbackDevice].Name : $"INDEX {settings.LoopbackDevice} (out of range)";
+        if (settings.LoopbackDevice >= renders.Count) ok = false;
+        Console.WriteLine($"Loopback {name}");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Devices  ERROR: {ex.Message}");
+        ok = false;
+    }
+
+    var dir = Path.GetFullPath(settings.OutputDir);
+    if (Directory.Exists(dir))
+        Console.WriteLine($"Output   {dir}");
+    else
+    {
+        Console.WriteLine($"Output   {dir}  (does not exist yet — will be created on record)");
+    }
+    Console.WriteLine($"Model    {settings.Model}  diarize={settings.Diarize}  language={settings.Language ?? "auto"}");
+    Console.WriteLine(ok ? "OK" : "PROBLEMS FOUND (see above)");
+    return ok ? 0 : 1;
 }
 
 static int CmdRecord(Settings settings, string[] rest)
@@ -151,14 +203,19 @@ static int CmdRecord(Settings settings, string[] rest)
     catch (Exception ex)
     {
         Console.Error.WriteLine($"Failed to start capture: {ex.Message}");
+        Log.Write($"record FAILED to start: {ex.Message}");
         return 1;
     }
+    Log.Write($"record start → {Path.GetFullPath(outPath)} (rate={rate}, keepalive={keepAlive}, " +
+              $"mic={settings.MicDevice?.ToString() ?? "default"}, loopback={settings.LoopbackDevice?.ToString() ?? "default"})");
 
     while (!stopped) Thread.Sleep(100);
     recorder.Stop();
     lock (meter) Console.WriteLine();
 
     var info = new FileInfo(outPath);
+    Log.Write($"record stop — {recorder.Duration:hh\\:mm\\:ss}, {info.Length / 1024.0 / 1024.0:F1} MB, " +
+              $"micLost={recorder.MicFailed}, loopbackLost={recorder.LoopbackFailed}");
     Console.WriteLine($"Saved {Path.GetFullPath(outPath)} — {recorder.Duration:hh\\:mm\\:ss} " +
                       $"{info.Length / 1024.0 / 1024.0:F1} MB " +
                       $"{(recorder.MicFailed ? "(mic channel lost!)" : "")}" +
@@ -202,6 +259,7 @@ static async Task<int> CmdTranscribe(Settings settings, string[] rest)
 
     using var server = new SttServer(settings.ServerUrl);
     var health = await server.GetHealthAsync();
+    Log.Write($"transcribe {file}: server {settings.ServerUrl} → {health}");
     if (health == Health.Unreachable)
     {
         Console.Error.WriteLine($"Server {settings.ServerUrl} is UNREACHABLE. " +
@@ -228,35 +286,75 @@ static async Task<int> CmdTranscribe(Settings settings, string[] rest)
         Console.Out.Flush();
     });
 
-    try
-    {
-        var json = await server.TranscribeAsync(file, model, diarize, language, progress);
-        Console.WriteLine("\r\x1b[K");
+    // Ctrl+C during the long wait cancels the request cleanly instead of killing the process.
+    using var cts = new CancellationTokenSource();
+    var userCancelled = false;
+    Console.CancelKeyPress += (s, e) => { e.Cancel = true; userCancelled = true; cts.Cancel(); };
 
-        var t = TranscriptRenderer.Parse(json);
-        var baseName = Path.Combine(Path.GetDirectoryName(file)!, Path.GetFileNameWithoutExtension(file));
-        var txtPath = baseName + ".transcript.txt";
-        var jsonPath = baseName + ".transcript.json";
-        File.WriteAllText(txtPath, TranscriptRenderer.RenderText(t));
-        File.WriteAllText(jsonPath, TranscriptRenderer.PrettyJson(json));
+    const int maxAttempts = 3;
+    for (int attempt = 1; ; attempt++)
+    {
+        Log.Write($"transcribe {file}: attempt {attempt}/{maxAttempts} " +
+                  $"(model={model} diarize={diarize} language={language ?? "auto"})");
+        try
+        {
+            var json = await server.TranscribeAsync(file, model, diarize, language, progress, cts.Token);
+            Console.WriteLine("\r\x1b[K");
 
-        Console.WriteLine($"Done. {t.Segments.Count} segments, language={t.Language ?? "?"}");
-        Console.WriteLine($"  text: {txtPath}");
-        Console.WriteLine($"  json: {jsonPath} (word-level timestamps + speakers)");
-        return 0;
-    }
-    catch (SttServerError ex)
-    {
-        // The detail body is the only record of the server-side failure.
-        Console.WriteLine("\r\x1b[K");
-        Console.Error.WriteLine($"HTTP {ex.StatusCode} — server said:");
-        Console.Error.WriteLine(ex.Body);
-        return 1;
-    }
-    catch (OperationCanceledException)
-    {
-        Console.WriteLine("\r\x1b[KCancelled (timeout or interrupt). The upload is idempotent — just run it again.");
-        return 1;
+            var t = TranscriptRenderer.Parse(json);
+            var baseName = Path.Combine(Path.GetDirectoryName(file)!, Path.GetFileNameWithoutExtension(file));
+            var txtPath = baseName + ".transcript.txt";
+            var jsonPath = baseName + ".transcript.json";
+            File.WriteAllText(txtPath, TranscriptRenderer.RenderText(t));
+            File.WriteAllText(jsonPath, TranscriptRenderer.PrettyJson(json));
+            Log.Write($"transcribe {file}: OK — {t.Segments.Count} segments, language={t.Language ?? "?"} " +
+                      $"→ {txtPath}");
+
+            Console.WriteLine($"Done. {t.Segments.Count} segments, language={t.Language ?? "?"}");
+            Console.WriteLine($"  text: {txtPath}");
+            Console.WriteLine($"  json: {jsonPath} (word-level timestamps + speakers)");
+            return 0;
+        }
+        catch (SttServerError ex)
+        {
+            // The server answered — the detail body is the only record of the failure.
+            // No retry: re-POSTing the same input gets the same error.
+            Console.WriteLine("\r\x1b[K");
+            Log.Write($"transcribe {file}: FAILED — HTTP {ex.StatusCode}: {ex.Body}");
+            Console.Error.WriteLine($"HTTP {ex.StatusCode} — server said:");
+            Console.Error.WriteLine(ex.Body);
+            return 1;
+        }
+        catch (OperationCanceledException) when (userCancelled)
+        {
+            Console.WriteLine("\r\x1b[KCancelled by user. The upload is idempotent — just run it again.");
+            Log.Write($"transcribe {file}: cancelled by user on attempt {attempt}");
+            return 1;
+        }
+        catch (OperationCanceledException)
+        {
+            // Timeout (or transport reset). The POST is idempotent — re-POST from the same WAV.
+            Console.WriteLine("\r\x1b[KTimeout or connection lost.");
+            Log.Write($"transcribe {file}: timed out / connection lost on attempt {attempt}");
+        }
+        catch (HttpRequestException ex)
+        {
+            Console.WriteLine($"\r\x1b[KNetwork error: {ex.Message}");
+            Log.Write($"transcribe {file}: network error on attempt {attempt}: {ex.Message}");
+        }
+
+        if (attempt >= maxAttempts)
+        {
+            Console.Error.WriteLine($"Giving up after {maxAttempts} attempts.");
+            return 1;
+        }
+        Console.WriteLine($"Retrying (attempt {attempt + 1}/{maxAttempts}) in 5 s — the re-POST is idempotent.");
+        try { await Task.Delay(5000, cts.Token); }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine("\r\x1b[KCancelled by user.");
+            return 1;
+        }
     }
 }
 

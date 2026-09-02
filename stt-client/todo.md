@@ -36,10 +36,23 @@
 
 ### Not yet done
 
-- [ ] Phase 3 hardening (self-check, resume/retry, config persistence of last
-      devices — partial: devices are persisted on selection, logging)
+- [x] Phase 3 hardening (self-check via `check` command, auto-retry on network/timeout
+      failures ×3 with idempotent re-POST, config persistence of last devices, Ctrl+C
+      cancels upload cleanly, logging to `stt-client.log` in the output dir)
 - [x] Single-file self-contained publish: `publish/stt-client.exe` (68 MB, runtime bundled, runs standalone)
-- [ ] Phase 4 TUI (Spectre.Console)
+- [x] Phase 4 TUI (`stt-client tui`, Spectre.Console 0.57.2): home screen with server
+      status badge, device picker (persists), live record display (meters, size, Esc/Space
+      to stop, keep-awake), transcribe progress (upload bar + indeterminate server phase,
+      retry ×3), meeting flow, transcript pager, config editor with inline health test.
+      NOTE: verified by build + reflection against 0.57.2 (no AnonConsoleApp exists;
+      AnsiConsole.Prompt is sync; labels come from value.ToString() → Option records);
+      TUI itself not yet exercised interactively end-to-end.
+
+### Publish
+
+Re-publish after changes: `dotnet publish SttClient -c Release -r win-x64 --self-contained
+-p:PublishSingleFile=true` → `publish/stt-client.exe` (the checked-in binary predates
+Phase 3/4).
 
 C# application: records mic + speakers (WASAPI loopback) for a meeting, then on
 demand uploads to the WhisperX server and produces a transcript. See `FINDINGS.md`
