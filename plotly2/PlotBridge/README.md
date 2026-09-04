@@ -125,8 +125,84 @@ schema validation and is silently ignored. Validate after editing:
 powershell -ExecutionPolicy Bypass -File PlotBridge\tools\Test-Natvis.ps1
 ```
 
+Also registered: the FlashCUT CAM types — see below.
+
 The extension never overwrites your copy; a newer version is written alongside
 as `PlotBridge.natvis.new`.
+
+### FlashCUT CAM types
+
+`IActionCollection` (so `FActionCollection` and `FRoute`) and `FFeature` are
+registered too, along with the `std::vector<std::unique_ptr<FAction>>` and
+`std::vector<std::unique_ptr<FEntity>>` they hold — so the glyph is there one
+level in as well, which is usually where you are when you want it.
+
+None of them is a container of numbers: they hold polymorphic children whose
+coordinates live on the derived type. So each carries a `[chart3d]` synthetic
+built from an `IndexListItems` that walks the vector **twice per element** —
+once through a `rawbegin` view, once through `rawend` — and the concrete types
+(`FActMoveLine`, `FActMoveArc`, `FActPierce`, `FActDrillCycle`,
+`FActPunchCycle`, `FActNewPeriod`, `FEntLine`, `FEntArc`) each define those two
+views as a tab-separated point. A chain of segments therefore arrives as a
+polyline with its final endpoint intact, and the shared vertices doubled, which
+changes nothing about the line.
+
+`FAction` and `FEntity` define a `#` fallback for both views, so an action with
+no position — dwell, suspend-THC, set-RPM — contributes a comment line the
+server's parser drops, rather than contributing nonsense.
+
+**Arcs come out as chords on this path**, and they cannot come out any other
+way: natvis expressions permit no function calls and no trigonometry, so
+nothing in a natvis file can sample a curve. `FActMoveArc` and `FEntArc` give up
+their two endpoints and the plot cuts the corner.
+
+#### `FPlotDump`, for arcs that are actually arcs
+
+`Common/CAMENGINE/PlotDump.h` in the appmain repo is the in-process half. It
+walks the same objects through `FActMove::GetProportionalPosition` and
+`FEntEdge::GetProportionalPosition`, so it plots the path the machine will
+travel. From the Immediate Window, stopped in a native frame:
+
+```
+FPlotDump::SendActions(pCollection, "toolpath")
+FPlotDump::SendRoute(pRoute, "route")
+FPlotDump::SendFeature(pFeature, "profile")
+FPlotDump::SendPoints(points, "scratch", "hull")
+```
+
+The return value is the number of points written, so `0` says the dump found no
+geometry rather than leaving you to wonder whether it ran. Each series becomes
+one file in the [drop folder](#drop-a-file), which means no socket, no link
+dependency, and no dialog — but also, being the drop folder, no confirmation
+that the data landed. That is the right trade for something a human is watching.
+
+| | |
+|---|---|
+| `SendActions` | one series per phase: `cut`, `rapid`, `lead`, `plunge`, `other` |
+| `SendRoute` | the same, plus `approach.*` and `return.*` |
+| `SendFeature` | `path` (tessellated), `vertices` (entity endpoints), `mesh` |
+| `SendPoints` | a `std::vector<gp_Pnt>` you already hold, under a name you pick |
+
+A phase occurring in several separate stretches gets one series per stretch —
+`cut.1`, `cut.2` — so nothing draws a line across a gap the tool never
+travelled. Past `Options::m_maxSeries` (32) stretches the legend costs more than
+the accuracy is worth and they merge back per phase, which does bring those
+connecting lines back.
+
+`SendRoute` exists because `FRoute::GetNumberOfActions()` reports the core moves
+only — a route's approach and return live in collections of their own. Going
+through the `IActionCollection` interface would quietly drop every rapid that
+got the tool there. The natvis `[chart3d]` on `FRoute` has the same blind spot
+and says so in its own display string; its `[approach]` and `[return]` rows are
+`FActionCollection`s, so each can be plotted on its own from the glyph.
+
+`Options` also carries `m_board`, `m_chordTolerance` (0 asks for
+`radius * 0.001` — no unit needed, about 70 segments to the full circle),
+`m_maxPointsPerSeries` and `m_splitByPhase`. A truncated series says so in its
+file's header comment.
+
+Writing files can only add and replace, so a series a later dump no longer
+produces stays on the chart; `POST /clear?chart=name` is what removes one.
 
 ### If the glyph doesn't appear
 
@@ -405,6 +481,48 @@ something the marker shape already says.
 
 ## Gotchas
 
+- **Flat 3D data used to render nothing, and equal aspect was why.** A planar
+  toolpath — a profile at constant z, or the constant-x case this was found on —
+  leaves one axis with an extent of zero, or of 7e-18 once floating point has had
+  its say. `aspectmode: "data"` normalises the other two against it, and on a real
+  44-point path `aspectratio` came back `{x: 5e-12, y: 681558, z: 288527}`. A
+  scene box 680,000 units tall does not render, takes camera interaction with it
+  (hence "can't pan or zoom"), and corrupts autorange on the way — the y range no
+  longer contained the data. Adding any non-flat series gave the axis extent back
+  and everything reappeared, which is the tell.
+
+  Flat geometry is the common case in CAM, so `app.js` computes the box itself.
+  The recipe was arrived at by counting rendered pixels, because **two of the
+  obvious fixes silently drop the trace and draw an empty box**: an explicit
+  `range` on the flat axis (any width, from ±0.5 down to a thin slab), and a thin
+  `aspectratio` share for it (0.04 of the largest draws nothing; matching the
+  largest draws correctly). So the flat coordinate is instead *collapsed to one
+  value* — which also stops the renderer drawing rounding error as real depth,
+  since the un-collapsed range spans the noise itself and puts every point on one
+  face of the box or the other — the flat axis is given the largest real extent as
+  its share, and no range is set on it. The axes that carry extent keep their
+  exact 1:1 relationship, so a circle in the plane still looks like a circle;
+  `aspectmode: "cube"` draws but is not the answer, because it stretches each axis
+  independently and so shows the geometry out of proportion. The ratio arithmetic
+  matches Plotly's own — normalised to a product of 1, from data spans, whose
+  padding is proportional — and reproduces what `"data"` computes to 16
+  significant figures on non-flat charts, so those are provably unaffected.
+- **`DEBUGPROP_INFO_VALUE` is the *raw* value, not what the Watch window shows.**
+  The natvis `DisplayString` — including every `view(rawxyz)` the `[chart3d]`
+  nodes are built on — is *autoexpand* formatting, and the engine applies it only
+  when asked with `DEBUGPROP_INFO_VALUE_AUTOEXPAND`. Miss that flag and a struct
+  still works, because its raw value is an inline member summary
+  (`{x=1.5 y=2.25 z=0}`), which is why `std::vector<gp_Pnt>` read fine for
+  months. Anything whose numbers exist *because* natvis says so comes back with
+  no numbers at all — so the chart-view rows look empty, the element-values route
+  is skipped, and the deep scan harvests the first numeric-looking child it can
+  find instead. On a class with a vtable that is `__vfptr`, and the plot becomes
+  the digit runs in a module address: `0x00007ff748…` → `(0, 7, 748)`, the same
+  point for every row, moving between sessions as the DLL rebases. Diagnosed off
+  exactly that signature. Two guards now stand behind the flag:
+  `DebuggerPoints.IsPlottableChild` refuses a `__vfptr` child or any value
+  containing an address, and `TextPoints` drops hex literals before scanning for
+  numbers, so a pointer produces *no* point rather than a plausible wrong one.
 - **Windows PowerShell 5.1 `ConvertTo-Json` corrupts typed arrays.** A
   `double[]` serialises as `{"value":[…],"Count":n}`, not a JSON array, and its
   numbers follow the current culture — on a comma-decimal locale `1,5` reads as
@@ -448,14 +566,15 @@ something the marker shape already says.
 - **P3** — `IDebugMemoryBytes2.ReadAt` as an opt-in fast path if child
   enumeration proves too slow on real data (`std::vector<gp_Pnt>` is a packed
   array of 24-byte triples, and `IDebugProperty3` derives from
-  `IDebugProperty2`, so the same property offers both). Then a `PlotDump()`
-  helper for what no decoder reaches — `NCollection_Sequence`, `TopoDS_*`,
-  `Poly_Triangulation` — and break-counter series naming so successive stops
-  overlay instead of overwrite.
-- **P3** — a `PlotDump()` helper compiled into Debug builds, func-eval'd by the
-  extension, for everything the memory decoder can't reach (`NCollection_Sequence`,
-  `TopoDS_*`, `Poly_Triangulation`). Plus break-counter series naming, so
-  successive stops overlay instead of overwrite.
+  `IDebugProperty2`, so the same property offers both). Plus break-counter
+  series naming, so successive stops overlay instead of overwrite.
+- **P3 — partly landed.** The in-process dump helper, for the geometry no
+  value-string decoder can reach. `FPlotDump` covers the CAM types —
+  `IActionCollection`, `FRoute`, `FFeature` — and is called by hand from the
+  Immediate Window; see [FlashCUT CAM types](#flashcut-cam-types). Still open:
+  having the extension func-eval it, so the glyph itself gets arc-accurate
+  geometry instead of chords, and the same treatment for `NCollection_Sequence`,
+  `TopoDS_*` and `Poly_Triangulation`.
 
 ## Layout
 

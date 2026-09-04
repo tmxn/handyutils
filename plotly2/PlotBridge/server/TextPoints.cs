@@ -19,6 +19,15 @@ public static partial class TextPoints
     [GeneratedRegex(@"^\s*\[\s*\d+\s*\]\s*", RegexOptions.CultureInvariant)]
     private static partial Regex IndexPrefix();
 
+    /// <summary>
+    /// Hex literals, dropped before the number scan. A pointer is not a
+    /// coordinate, but its digit runs parse as three perfectly plausible ones:
+    /// <c>0x00007ff748…</c> yields 0, 7, 748 and plots as a point. Silently, and
+    /// identically for every row, which is the worst way for this to fail.
+    /// </summary>
+    [GeneratedRegex(@"0[xX][0-9a-fA-F]+", RegexOptions.CultureInvariant)]
+    private static partial Regex HexLiteral();
+
     [GeneratedRegex(@"[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?", RegexOptions.CultureInvariant)]
     private static partial Regex Number();
 
@@ -35,6 +44,7 @@ public static partial class TextPoints
             if (line.Length == 0 || line.StartsWith('#') || line.StartsWith("//")) continue;
 
             line = IndexPrefix().Replace(line, "");
+            line = HexLiteral().Replace(line, " ");
 
             var nums = new List<double>(4);
             foreach (Match m in Number().Matches(line))

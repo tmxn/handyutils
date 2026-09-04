@@ -236,7 +236,12 @@ namespace PlotBridge.Vsix
                     var parts = new List<string>(3);
                     Enumerate(element, withChildProperties: false, visit: (name, value, child) =>
                     {
-                        if (!string.IsNullOrEmpty(value) && HasNumber.IsMatch(value)) parts.Add(value);
+                        // A vtable pointer is never a coordinate, and it is the first
+                        // child of every polymorphic object - so without this it wins
+                        // the race for the three slots below and plots as the digit
+                        // runs in its own address. Any pointer is equally useless.
+                        if (!IsPlottableChild(name, value)) return true;
+                        if (HasNumber.IsMatch(value)) parts.Add(value);
                         return parts.Count < 3;
                     });
 
@@ -248,6 +253,19 @@ namespace PlotBridge.Vsix
             }
 
             return VSConstants.S_OK;
+        }
+
+        /// <summary>
+        /// Whether a child of an opaque element could carry coordinates at all.
+        /// Excludes the vtable slot and anything whose value is an address: both
+        /// contain digits, so the number scan would otherwise take them.
+        /// </summary>
+        private static bool IsPlottableChild(string name, string value)
+        {
+            if (string.IsNullOrEmpty(value)) return false;
+            if (name != null && name.StartsWith("__vf", StringComparison.Ordinal)) return false;
+            if (value.IndexOf("0x", StringComparison.OrdinalIgnoreCase) >= 0) return false;
+            return true;
         }
 
         private static bool IsChartView(string name)
@@ -288,7 +306,26 @@ namespace PlotBridge.Vsix
                                      Func<string, string, IDebugProperty2, bool> visit)
         {
             var filter = Guid.Empty;
-            var fields = enum_DEBUGPROP_INFO_FLAGS.DEBUGPROP_INFO_NAME | enum_DEBUGPROP_INFO_FLAGS.DEBUGPROP_INFO_VALUE;
+
+            // DEBUGPROP_INFO_VALUE on its own asks for the *raw* value. That is enough
+            // for a struct, whose raw value is an inline member summary -
+            // "{x=1.5 y=2.25 z=0}" - which is why a std::vector<gp_Pnt> reads fine
+            // without this flag: the numbers are right there.
+            //
+            // It is not enough for anything whose numbers only exist because natvis
+            // says so. A DisplayString - including the view(rawxyz) ones the [chart3d]
+            // nodes are built on - is *autoexpand* formatting, and the engine only
+            // applies it when asked. Without VALUE_AUTOEXPAND a polymorphic object
+            // comes back with no numbers in it at all, so the chart-view rows look
+            // empty, route 2 is skipped, and the deep scan below harvests the first
+            // numeric-looking child it can find instead - which for a class with a
+            // vtable is __vfptr. That plotted every row as the same three numbers
+            // (0, 7, 748 - the digit runs in a 0x00007ff748... module address), moving
+            // between sessions as the DLL rebased. Measured, not guessed: this is the
+            // flag that made the difference.
+            var fields = enum_DEBUGPROP_INFO_FLAGS.DEBUGPROP_INFO_NAME
+                       | enum_DEBUGPROP_INFO_FLAGS.DEBUGPROP_INFO_VALUE
+                       | enum_DEBUGPROP_INFO_FLAGS.DEBUGPROP_INFO_VALUE_AUTOEXPAND;
             if (withChildProperties) fields |= enum_DEBUGPROP_INFO_FLAGS.DEBUGPROP_INFO_PROP;
 
             IEnumDebugPropertyInfo2 enumerator;

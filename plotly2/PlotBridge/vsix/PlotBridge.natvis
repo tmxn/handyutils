@@ -103,4 +103,257 @@
   </Type>
   -->
 
+  <!-- ============================================== FlashCUT CAM types ====
+
+       Two containers, both holding polymorphic children whose coordinates live
+       on the derived type - not on the base, and not in the container:
+
+         IActionCollection   FActionCollection, FRoute
+                             std::vector<std::unique_ptr<FAction>> m_actions
+         FFeature            std::vector<std::unique_ptr<FEntity>> m_listEntities
+
+       So neither has [0]..[n-1] children carrying numbers, and the plain routes
+       in DebuggerPoints.cs have nothing to read. Each gets a [chart3d] node
+       instead, built from an IndexListItems that walks the vector twice per
+       element - once through a "rawbegin" view, once through "rawend" - so a
+       chain of segments arrives as a polyline with its last endpoint intact.
+       The views are defined per concrete type below.
+
+       FAction and FEntity define a "#" fallback for both views, and the server's
+       text parser skips a line starting with "#". An action with no geometry -
+       dwell, suspend-THC, set-RPM - therefore contributes nothing rather than
+       contributing nonsense.
+
+       ARCS COME OUT AS CHORDS HERE, and they cannot come out any other way:
+       natvis expressions allow no function calls and no trigonometry, so
+       nothing in this file can sample a curve. FActMoveArc and FEntArc give up
+       their two endpoints and the plot cuts the corner. When that matters - on
+       a real toolpath it usually does - use the in-process helper, which walks
+       the same objects through GetProportionalPosition and plots what the
+       machine actually travels:
+
+           FPlotDump::SendActions(pCollection, "toolpath")
+           FPlotDump::SendFeature(pFeature, "profile")
+           FPlotDump::SendRoute(pRoute, "route")
+
+       from the Immediate Window, stopped in a native frame. See
+       Common/CAMENGINE/PlotDump.h in the appmain repo.
+
+       The UIVisualizer registrations below are separate Type entries from the
+       [chart3d] ones because natvis.xsd will not let one Type carry both.
+  -->
+
+  <Type Name="IActionCollection">
+    <UIVisualizer ServiceId="{3f7a1c58-9e2b-4d16-8a54-c6b0f39d7e42}" Id="1" />
+  </Type>
+
+  <Type Name="FActionCollection">
+    <UIVisualizer ServiceId="{3f7a1c58-9e2b-4d16-8a54-c6b0f39d7e42}" Id="1" />
+  </Type>
+
+  <Type Name="FRoute">
+    <UIVisualizer ServiceId="{3f7a1c58-9e2b-4d16-8a54-c6b0f39d7e42}" Id="1" />
+  </Type>
+
+  <Type Name="FFeature">
+    <UIVisualizer ServiceId="{3f7a1c58-9e2b-4d16-8a54-c6b0f39d7e42}" Id="1" />
+  </Type>
+
+  <!-- The vectors themselves, so m_actions and m_listEntities are plottable
+       where you usually are when you want them: one level into the owner. -->
+
+  <Type Name="std::vector&lt;std::unique_ptr&lt;FAction,*&gt;,*&gt;">
+    <UIVisualizer ServiceId="{3f7a1c58-9e2b-4d16-8a54-c6b0f39d7e42}" Id="1" />
+  </Type>
+
+  <Type Name="std::vector&lt;std::unique_ptr&lt;FEntity,*&gt;,*&gt;">
+    <UIVisualizer ServiceId="{3f7a1c58-9e2b-4d16-8a54-c6b0f39d7e42}" Id="1" />
+  </Type>
+
+  <!-- ================================================ the chart nodes ====
+
+       A custom Expand replaces the default one, so the members worth seeing are
+       listed back explicitly and [Raw View] still carries everything else.
+       Every Item is Optional, so a renamed field costs that one row rather than
+       the whole entry.
+  -->
+
+  <Type Name="FActionCollection" Inheritable="false">
+    <Intrinsic Name="count" Expression="(int)(m_actions._Mypair._Myval2._Mylast - m_actions._Mypair._Myval2._Myfirst)" />
+    <Intrinsic Name="action" Expression="m_actions._Mypair._Myval2._Myfirst[index]._Mypair._Myval2">
+      <Parameter Name="index" Type="int" />
+    </Intrinsic>
+    <DisplayString>{{ actions={count()} }}</DisplayString>
+    <Expand>
+      <Synthetic Name="[chart3d]" Optional="true" Condition="count() != 0">
+        <DisplayString>{count()} actions, endpoints only - arcs are chords</DisplayString>
+        <Expand>
+          <IndexListItems>
+            <Size>count() * 2</Size>
+            <ValueNode Condition="action($i / 2) == 0">"#"</ValueNode>
+            <ValueNode Condition="$i % 2 == 0">*action($i / 2),view(rawbegin)</ValueNode>
+            <ValueNode>*action($i / 2),view(rawend)</ValueNode>
+          </IndexListItems>
+        </Expand>
+      </Synthetic>
+      <Item Name="[actions]" Optional="true">m_actions</Item>
+    </Expand>
+  </Type>
+
+  <!-- FRoute keeps its approach and return moves in collections of their own,
+       and GetNumberOfActions() reports neither, so this node is the core moves
+       only - exactly what the IActionCollection interface shows. The [approach]
+       and [return] rows are FActionCollections, so each carries its own
+       [chart3d] and can be plotted on its own from the glyph.
+       FPlotDump::SendRoute is the one route-wide view. -->
+
+  <Type Name="FRoute" Inheritable="false">
+    <Intrinsic Name="count" Expression="(int)(m_actions._Mypair._Myval2._Mylast - m_actions._Mypair._Myval2._Myfirst)" />
+    <Intrinsic Name="action" Expression="m_actions._Mypair._Myval2._Myfirst[index]._Mypair._Myval2">
+      <Parameter Name="index" Type="int" />
+    </Intrinsic>
+    <DisplayString>{{ core actions={count()} }}</DisplayString>
+    <Expand>
+      <Synthetic Name="[chart3d]" Optional="true" Condition="count() != 0">
+        <DisplayString>{count()} core actions - arcs are chords, approach/return not included</DisplayString>
+        <Expand>
+          <IndexListItems>
+            <Size>count() * 2</Size>
+            <ValueNode Condition="action($i / 2) == 0">"#"</ValueNode>
+            <ValueNode Condition="$i % 2 == 0">*action($i / 2),view(rawbegin)</ValueNode>
+            <ValueNode>*action($i / 2),view(rawend)</ValueNode>
+          </IndexListItems>
+        </Expand>
+      </Synthetic>
+      <Item Name="[actions]" Optional="true">m_actions</Item>
+      <Item Name="[approach]" Optional="true">m_approachActions</Item>
+      <Item Name="[return]" Optional="true">m_returnActions</Item>
+      <Item Name="[operation]" Optional="true">m_pOperation</Item>
+      <Item Name="[processId]" Optional="true">m_processId</Item>
+      <Item Name="[forward]" Optional="true">m_bForward</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="FFeature" Inheritable="false">
+    <Intrinsic Name="count" Expression="(int)(m_listEntities._Mypair._Myval2._Mylast - m_listEntities._Mypair._Myval2._Myfirst)" />
+    <Intrinsic Name="entity" Expression="m_listEntities._Mypair._Myval2._Myfirst[index]._Mypair._Myval2">
+      <Parameter Name="index" Type="int" />
+    </Intrinsic>
+    <DisplayString>{{ {m_type} entities={count()} }}</DisplayString>
+    <Expand>
+      <Synthetic Name="[chart3d]" Optional="true" Condition="count() != 0">
+        <DisplayString>{count()} entities, endpoints only - arcs are chords</DisplayString>
+        <Expand>
+          <IndexListItems>
+            <Size>count() * 2</Size>
+            <ValueNode Condition="entity($i / 2) == 0">"#"</ValueNode>
+            <ValueNode Condition="$i % 2 == 0">*entity($i / 2),view(rawbegin)</ValueNode>
+            <ValueNode>*entity($i / 2),view(rawend)</ValueNode>
+          </IndexListItems>
+        </Expand>
+      </Synthetic>
+      <Item Name="[entities]" Optional="true">m_listEntities</Item>
+      <Item Name="[type]" Optional="true">m_type</Item>
+      <Item Name="[joinTolerance]" Optional="true">m_joinTolerance</Item>
+      <Item Name="[cuttingSide]" Optional="true">m_cuttingSide</Item>
+      <Item Name="[normalHint]" Optional="true">m_featureNormalHint</Item>
+      <Item Name="[sourceTags]" Optional="true">m_setSourceObjectTags</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="std::vector&lt;std::unique_ptr&lt;FAction,*&gt;,*&gt;" Inheritable="false">
+    <AlternativeType Name="std::vector&lt;std::unique_ptr&lt;FEntity,*&gt;,*&gt;" Inheritable="false" />
+    <Intrinsic Name="count" Expression="(int)(_Mypair._Myval2._Mylast - _Mypair._Myval2._Myfirst)" />
+    <Intrinsic Name="element" Expression="_Mypair._Myval2._Myfirst[index]._Mypair._Myval2">
+      <Parameter Name="index" Type="int" />
+    </Intrinsic>
+    <DisplayString>{{ size={count()} }}</DisplayString>
+    <Expand>
+      <Synthetic Name="[chart3d]" Optional="true" Condition="count() != 0">
+        <DisplayString>{count()} elements, endpoints only - arcs are chords</DisplayString>
+        <Expand>
+          <IndexListItems>
+            <Size>count() * 2</Size>
+            <ValueNode Condition="element($i / 2) == 0">"#"</ValueNode>
+            <ValueNode Condition="$i % 2 == 0">*element($i / 2),view(rawbegin)</ValueNode>
+            <ValueNode>*element($i / 2),view(rawend)</ValueNode>
+          </IndexListItems>
+        </Expand>
+      </Synthetic>
+      <ArrayItems>
+        <Size>count()</Size>
+        <ValuePointer>_Mypair._Myval2._Myfirst</ValuePointer>
+      </ArrayItems>
+    </Expand>
+  </Type>
+
+  <!-- ========================================= one point per view, raw ====
+
+       IncludeView-scoped DisplayStrings: invisible in every ordinary debugger
+       window, so they cannot change how these types look. Tab-separated,
+       because TextPoints.cs takes the first three numbers on a line.
+
+       Both views are defined on every geometry-bearing type, even where the
+       type is a single position (a pierce, a drill cycle) - the [chart3d] nodes
+       ask for the pair unconditionally, and a position emitted twice is one
+       vertex on the plot, not two.
+  -->
+
+  <Type Name="FAction" IncludeView="rawbegin">
+    <DisplayString># no geometry</DisplayString>
+  </Type>
+  <Type Name="FAction" IncludeView="rawend">
+    <DisplayString># no geometry</DisplayString>
+  </Type>
+
+  <Type Name="FActMoveLine" IncludeView="rawbegin">
+    <AlternativeType Name="FActMoveArc" />
+    <AlternativeType Name="FActDrillCycle" />
+    <AlternativeType Name="FActPunchCycle" />
+    <DisplayString>{m_posBegin.m_position.coord.x} &#009; {m_posBegin.m_position.coord.y} &#009; {m_posBegin.m_position.coord.z}</DisplayString>
+  </Type>
+  <Type Name="FActMoveLine" IncludeView="rawend">
+    <AlternativeType Name="FActMoveArc" />
+    <DisplayString>{m_posEnd.m_position.coord.x} &#009; {m_posEnd.m_position.coord.y} &#009; {m_posEnd.m_position.coord.z}</DisplayString>
+  </Type>
+
+  <!-- A cycle is one position, so rawend repeats it rather than reaching for an
+       m_posEnd that does not exist. -->
+  <Type Name="FActDrillCycle" IncludeView="rawend">
+    <AlternativeType Name="FActPunchCycle" />
+    <DisplayString>{m_posBegin.m_position.coord.x} &#009; {m_posBegin.m_position.coord.y} &#009; {m_posBegin.m_position.coord.z}</DisplayString>
+  </Type>
+
+  <Type Name="FActPierce" IncludeView="rawbegin">
+    <DisplayString>{m_position.m_position.coord.x} &#009; {m_position.m_position.coord.y} &#009; {m_position.m_position.coord.z}</DisplayString>
+  </Type>
+  <Type Name="FActPierce" IncludeView="rawend">
+    <DisplayString>{m_position.m_position.coord.x} &#009; {m_position.m_position.coord.y} &#009; {m_position.m_position.coord.z}</DisplayString>
+  </Type>
+
+  <Type Name="FActNewPeriod" IncludeView="rawbegin">
+    <DisplayString>{m_beginPosition.m_position.coord.x} &#009; {m_beginPosition.m_position.coord.y} &#009; {m_beginPosition.m_position.coord.z}</DisplayString>
+  </Type>
+  <Type Name="FActNewPeriod" IncludeView="rawend">
+    <DisplayString>{m_endPosition.m_position.coord.x} &#009; {m_endPosition.m_position.coord.y} &#009; {m_endPosition.m_position.coord.z}</DisplayString>
+  </Type>
+
+  <Type Name="FEntity" IncludeView="rawbegin">
+    <DisplayString># no geometry</DisplayString>
+  </Type>
+  <Type Name="FEntity" IncludeView="rawend">
+    <DisplayString># no geometry</DisplayString>
+  </Type>
+
+  <!-- FEntLine and FEntArc keep gp_Pnt endpoints - one level shallower than the
+       actions, with no FToolTransform in between. -->
+  <Type Name="FEntLine" IncludeView="rawbegin">
+    <AlternativeType Name="FEntArc" />
+    <DisplayString>{m_posBegin.coord.x} &#009; {m_posBegin.coord.y} &#009; {m_posBegin.coord.z}</DisplayString>
+  </Type>
+  <Type Name="FEntLine" IncludeView="rawend">
+    <AlternativeType Name="FEntArc" />
+    <DisplayString>{m_posEnd.coord.x} &#009; {m_posEnd.coord.y} &#009; {m_posEnd.coord.z}</DisplayString>
+  </Type>
+
 </AutoVisualizer>

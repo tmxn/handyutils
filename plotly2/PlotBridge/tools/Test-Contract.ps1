@@ -78,11 +78,77 @@ $cases = @(
   @{ n = 'deep-scan join of expanded members'; series = 'c11'
      body = "1.5`t2.25`t-3.5`n4`t5.5`t6"
      want = @(@(1.5, 2.25, -3.5), @(4, 5.5, 6)) }
+
+  # The CAM containers (IActionCollection, FFeature) emit two lines per element -
+  # a rawbegin view then a rawend one - so a chain of segments arrives with the
+  # shared vertices doubled. Harmless to the polyline, but the count must not
+  # surprise anyone reading it: two entities, four lines, four points.
+  @{ n = 'CAM rawbegin/rawend pair, two lines per element'; series = 'c12'
+     body = "1.5 `t 2.25 `t 0`n3.5 `t 2.25 `t 0`n3.5 `t 2.25 `t 0`n3.5 `t 6 `t 0"
+     want = @(@(1.5, 2.25, 0), @(3.5, 2.25, 0), @(3.5, 2.25, 0), @(3.5, 6, 0)) }
+
+  # FAction and FEntity define this fallback for both raw views, so an action
+  # with no position (dwell, THC, set-RPM) contributes nothing. It is load
+  # bearing that the parser treats a leading '#' as a comment.
+  @{ n = 'CAM "# no geometry" fallback is skipped'; series = 'c13'
+     body = "# no geometry`n1.5 `t 2.25 `t -3.5`n# no geometry`n4 `t 5.5 `t 6"
+     want = @(@(1.5, 2.25, -3.5), @(4, 5.5, 6)) }
+
+  # A null element in the vector: the chart node guards it with a "#" literal,
+  # which the debugger renders with its quotes, so it is not a comment - it
+  # survives only because it carries no digits at all.
+  @{ n = 'CAM null-element placeholder yields no point'; series = 'c14'
+     body = "$([char]34)#$([char]34)`n1.5 `t 2.25 `t -3.5"
+     want = , @(1.5, 2.25, -3.5) }
+
+  # FPlotDump writes a header line naming the series and its point count. It has
+  # numbers in it, so it only stays out of the data because of the '#'.
+  @{ n = 'FPlotDump header comment is skipped, numbers and all'; series = 'c15'
+     body = "# toolpath / cut  1234 points`n1.5`t2.25`t-3.5"
+     want = , @(1.5, 2.25, -3.5) }
+
+  # Regression, found live. A vtable pointer read off a polymorphic object used to
+  # plot as the digit runs in its own address - 0x00007ff748... became (0, 7, 748)
+  # for every row, and moved between sessions as the DLL rebased. A pointer is not
+  # a coordinate, so hex literals are dropped before the numbers are scanned.
+  @{ n = 'a pointer value yields no point'; series = 'c16'
+     body = "0x00007ff748e51230`n1.5`t2.25`t-3.5"
+     want = , @(1.5, 2.25, -3.5) }
+
+  # The same address in the shape the older build actually pushed: 46 identical
+  # rows and nothing else. Wrong data must become NO data, not a flat line.
+  @{ n = 'a whole series of pointers yields nothing at all'; series = 'c17'
+     body = "0x00007ff6a1b2c3d0`n0x00007ff6a1b2c3d0`n0x00007ff6a1b2c3d0"
+     want = @() }
+
+  # Dropping the hex must not eat a real coordinate that happens to sit beside one.
+  @{ n = 'hex dropped, decimals beside it kept'; series = 'c18'
+     body = "0x00007ff748e51230 -0.035038461538460908 `t 0.42999999999999960 `t -0.89370078740157477"
+     want = , @(-0.035038461538460908, 0.42999999999999960, -0.89370078740157477) }
+
+  # A DOCUMENTED LIMIT, pinned deliberately. The full vtable rendering carries a
+  # digit inside its type annotation - the 9 in "void(*[9])()" - and a lone number
+  # on a line is a legitimate value-vs-index point (that is case c5). Telling those
+  # apart would mean guessing which digits are data, which is exactly what the
+  # tolerant paste path must not do. So this one is stopped on the client instead:
+  # DebuggerPoints.IsPlottableChild drops a child named __vfptr before it is ever
+  # pushed. If a future parser change makes this yield nothing, that is an
+  # improvement - update this case.
+  @{ n = 'vtable type annotation still leaks its digit (client-side filter covers it)'; series = 'c19'
+     body = "0x00007ff748e51230 {CAMEngine.dll!void(*[9])()}"
+     want = , @(0, 9) }
 )
 
+# A case with no plottable numbers at all is refused by /push rather than landing
+# as an empty series - which is the point of such a case, so the rejection is the
+# assertion. rejected = $true records that it happened.
+$rejected = @{}
 foreach ($c in $cases) {
-  $null = Invoke-RestMethod -Uri "$base/push?board=$board&chart=main&series=$($c.series)" `
-            -Method Post -ContentType 'text/plain' -Body $c.body
+  try {
+    $null = Invoke-RestMethod -Uri "$base/push?board=$board&chart=main&series=$($c.series)" `
+              -Method Post -ContentType 'text/plain' -Body $c.body
+  }
+  catch { $rejected[$c.series] = $true }
 }
 Start-Sleep -Milliseconds 300
 
@@ -94,7 +160,12 @@ foreach ($c in $cases) {
   $s = $byName[$c.series]
   $ok = $true; $detail = ''
 
-  if (-not $s) { $ok = $false; $detail = 'series missing' }
+  if ($c.want.Count -eq 0) {
+    # Nothing plottable: /push must refuse it, and no series may appear.
+    if (-not $rejected[$c.series]) { $ok = $false; $detail = 'expected /push to refuse it, but it was accepted' }
+    elseif ($s) { $ok = $false; $detail = 'refused, but a series appeared anyway' }
+  }
+  elseif (-not $s) { $ok = $false; $detail = 'series missing' }
   elseif (@($s.y).Count -ne $c.want.Count) { $ok = $false; $detail = "got $(@($s.y).Count) points, wanted $($c.want.Count)" }
   else {
     for ($i = 0; $i -lt $c.want.Count -and $ok; $i++) {

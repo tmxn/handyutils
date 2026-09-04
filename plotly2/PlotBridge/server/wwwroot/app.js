@@ -453,11 +453,150 @@ function resolve3d(chart) {
   return chart.series.some((s) => s.z && s.z.length);
 }
 
+// The data extent of a chart, per axis, over the series that are actually drawn.
+// Returns null when there is nothing finite to measure.
+function dataExtents(c, is3d) {
+  const lo = { x: Infinity, y: Infinity, z: Infinity };
+  const hi = { x: -Infinity, y: -Infinity, z: -Infinity };
+  let any = false;
+
+  for (const s of c.series) {
+    // A hidden series is 'legendonly': Plotly leaves it out of autorange and
+    // aspect, so it must be left out here too or the two disagree.
+    if (!s.visible) continue;
+    const axes = is3d ? AXES_3D : ['x', 'y'];
+    for (const a of axes) {
+      const arr = a === 'z' ? (s.z && s.z.length === s.y.length ? s.z : null) : s[a];
+      if (!arr) {
+        // A series with no z is drawn at z = 0 (see traceFor), so that is what it
+        // contributes to the extent. Only z is ever absent; x and y always exist.
+        if (a === 'z') { lo.z = Math.min(lo.z, 0); hi.z = Math.max(hi.z, 0); }
+        continue;
+      }
+      for (const v of arr) {
+        if (!Number.isFinite(v)) continue;
+        if (v < lo[a]) lo[a] = v;
+        if (v > hi[a]) hi[a] = v;
+        any = true;
+      }
+    }
+  }
+
+  if (!any) return null;
+  const span = (a) => (Number.isFinite(lo[a]) && Number.isFinite(hi[a]) ? hi[a] - lo[a] : 0);
+  return {
+    lo, hi,
+    span: { x: span('x'), y: span('y'), z: span('z') },
+  };
+}
+
+// Equal aspect in 3D is aspectmode "data", and that goes badly wrong on FLAT
+// data. A planar toolpath - a profile at constant z, or the constant-x case this
+// was found on - leaves one axis with an extent of zero, or of 7e-18 once
+// floating point has had its say. Plotly normalises the other two against it and
+// the scene box stops being a box: measured on a real 44-point path, aspectratio
+// came back {x: 5e-12, y: 681558, z: 288527}. 680,000 units tall does not render,
+// takes camera interaction down with it, and corrupts autorange on the way - the
+// y range no longer even contained the data. Flat geometry is the common case in
+// CAM, not an edge case.
+//
+// The working recipe below was arrived at by measuring the rendered pixels, not
+// by reading the docs - gl-plot3d fails in ways the schema does not hint at. Two
+// of the obvious fixes silently DROP THE TRACE, drawing an empty box:
+//
+//   * An explicit range on the flat axis. Any width at all, tested from +/-0.5
+//     down to the slab: the box draws, the path does not.
+//   * A thin aspect share for the flat axis. 0.04 of the largest draws nothing;
+//     matching the largest draws correctly.
+//
+// So neither the range nor a slab is available, and what works is:
+//
+//   1. COLLAPSE the flat coordinate to one constant value (see traceFor). Once
+//      the axis is exactly degenerate, Plotly expands it to value +/-1 on its
+//      own, which is both safe and better than the alternative: left as-is, the
+//      range spans the noise itself (5e-18 wide, across those ...908 vs ...915
+//      tails) and every point lands on one face of the box or the other, so
+//      rounding error is drawn as real depth.
+//   2. Give the flat axis an aspect share equal to the LARGEST real extent.
+//      Nothing extends along it, so its thickness claims no proportion and can
+//      be chosen freely - and choosing the largest keeps it as far as possible
+//      from the thin-share failure above.
+//   3. Never set a range on it.
+//
+// The axes that do carry extent keep their exact 1:1 relationship, which is the
+// part that has to stay true: within the plane of a planar path, a circle still
+// looks like a circle. That is also why aspectmode "cube" is not the answer here
+// even though it draws - it stretches each axis to fill the box independently, so
+// it renders the geometry out of proportion.
+//
+// The ratio arithmetic is matched to Plotly's own, measured rather than assumed:
+//   - the ratios are normalised so their PRODUCT is 1 (a geometric mean of 1)
+//   - autorange padding is proportional - range spans {3.1875, 3.1875, 0.797}
+//     against data spans {3, 3, 0.75}, all one factor - so normalised data spans
+//     and normalised range spans come out identical.
+// On a probe with no flat axis this reproduces what "data" computed to 16
+// significant figures, so non-flat charts are provably unaffected. Setting it
+// unconditionally is also what keeps the box honest across a chart switch:
+// uirevision preserves scene.aspectratio (it is user-draggable), so a mode left
+// un-set inherits the previous chart's box - seen live, a flat chart's
+// {0.04, 1, 0.42} leaking onto the next chart's data.
+//
+// A genuinely thin extent is left alone. Equal aspect is the one thing this mode
+// promises, and quietly fattening a real 0.1%-thick feature would be a lie about
+// the geometry. FLAT_AXIS_RATIO is set low enough to mean "this is not extent, it
+// is rounding error"; anything above it is real and is respected. If a real
+// feature is too thin to see, that is what the equal-aspect toggle is for.
+const FLAT_AXIS_RATIO = 1e-6;   // extent below this share of the largest is noise
+const AXES_3D = ['x', 'y', 'z'];
+
+// Which axes carry no real extent, and the single value each should collapse to.
+// Shared by the layout and the traces so the two cannot disagree - and computed
+// across every visible series, so a flat axis stays coplanar across all of them.
+function flatAxes(c, is3d) {
+  const ext = dataExtents(c, is3d);
+  if (!ext) return null;
+
+  const axes = is3d ? AXES_3D : ['x', 'y'];
+  const largest = Math.max(...axes.map((a) => ext.span[a]));
+  if (!(largest > 0)) return { ext, largest: 0, at: {} };
+
+  const at = {};
+  for (const a of axes) {
+    if (ext.span[a] > largest * FLAT_AXIS_RATIO) continue;
+    at[a] = Number.isFinite(ext.lo[a]) ? (ext.lo[a] + ext.hi[a]) / 2 : 0;
+  }
+  return { ext, largest, at };
+}
+
+function equalAspect3d(scene, flat) {
+  // Nothing measurable, or every axis flat: one point, or many copies of one.
+  // There is no shape to preserve, so a cube is the only sane box - and stating
+  // it, rather than leaving it, is what stops the last chart's box being inherited.
+  if (!flat || !(flat.largest > 0)) {
+    scene.aspectmode = 'cube';
+    scene.aspectratio = { x: 1, y: 1, z: 1 };
+    return;
+  }
+
+  const effective = {};
+  for (const a of AXES_3D) {
+    effective[a] = a in flat.at ? flat.largest : flat.ext.span[a];
+  }
+
+  const geoMean = Math.cbrt(effective.x * effective.y * effective.z);
+  scene.aspectmode = 'manual';
+  scene.aspectratio = {
+    x: effective.x / geoMean,
+    y: effective.y / geoMean,
+    z: effective.z / geoMean,
+  };
+}
+
 // Everything the on-screen plot and an exported image must agree on: axis styling,
 // fonts, legend, aspect. The two then diverge deliberately — the page layers view
 // state on top (uirevision, held zoom, drag mode), an export layers on a camera and
 // always autoranges. Sharing this much is what keeps a PNG looking like the page.
-function baseLayout(c, is3d, th) {
+function baseLayout(c, is3d, th, flat) {
   const axis = (title) => ({
     title: { text: title, font: { color: th.muted } },
     gridcolor: th.grid,
@@ -486,6 +625,9 @@ function baseLayout(c, is3d, th) {
       aspectmode: c.uniform ? 'data' : 'auto',
       bgcolor: th.surface,
     };
+    // Only "data" divides by the extents, so only "data" can be destroyed by an
+    // extent of zero. "auto" gives a cube and is already safe.
+    if (c.uniform) equalAspect3d(layout.scene, flat);
   } else {
     layout.xaxis = axis('x');
     layout.yaxis = axis('y');
@@ -506,10 +648,11 @@ function renderPlot() {
 
   const is3d = resolve3d(c);
   const th = chrome();
-  const traces = c.series.map((s) => traceFor(s, is3d));
+  const flat = flatAxes(c, is3d);
+  const traces = c.series.map((s) => traceFor(s, is3d, flat));
 
   const rev = `${c.name}|${is3d ? '3d' : '2d'}|${viewRev.get(c.name) || 0}`;
-  const layout = baseLayout(c, is3d, th);
+  const layout = baseLayout(c, is3d, th, flat);
   layout.uirevision = rev;
 
   if (is3d) {
@@ -600,7 +743,8 @@ async function renderToImage(msg) {
 
   try {
     const is3d = resolve3d(c);
-    const layout = baseLayout(c, is3d, chrome());
+    const flat = flatAxes(c, is3d);
+    const layout = baseLayout(c, is3d, chrome(), flat);
     layout.width = msg.width;
     layout.height = msg.height;
 
@@ -614,7 +758,7 @@ async function renderToImage(msg) {
       if (msg.up) layout.scene.camera.up = { x: msg.up[0], y: msg.up[1], z: msg.up[2] };
     }
 
-    const traces = c.series.map((s) => traceFor(s, is3d));
+    const traces = c.series.map((s) => traceFor(s, is3d, flat));
     await Plotly.newPlot(shim, traces, layout, { staticPlot: true, displaylogo: false });
 
     const dataUrl = await Plotly.toImage(shim, {
@@ -640,7 +784,16 @@ async function renderToImage(msg) {
   }
 }
 
-function traceFor(s, is3d) {
+/** The coordinate array for one axis, with a flat axis collapsed to its single
+ *  value. The spread being removed is below FLAT_AXIS_RATIO of the largest
+ *  extent - rounding error, not geometry - and leaving it in makes the renderer
+ *  draw it as real depth across the whole box. See equalAspect3d. */
+function coordsFor(arr, axis, flat, n) {
+  if (flat && axis in flat.at) return new Array(n).fill(flat.at[axis]);
+  return arr;
+}
+
+function traceFor(s, is3d, flat) {
   const color = colorFor(s);
   const si = symbolIndex((s.style && s.style.slot) || 0);
   const n = s.y.length;
@@ -648,8 +801,8 @@ function traceFor(s, is3d) {
 
   const t = {
     name: s.name,
-    x: s.x,
-    y: s.y,
+    x: coordsFor(s.x, 'x', flat, n),
+    y: coordsFor(s.y, 'y', flat, n),
     mode: s.style.mode || DEFAULT_DRAW_MODE,
     visible: s.visible ? true : 'legendonly',
     line: { color, width: 2 },
@@ -657,7 +810,8 @@ function traceFor(s, is3d) {
 
   if (is3d) {
     t.type = 'scatter3d';
-    t.z = s.z && s.z.length === n ? s.z : new Array(n).fill(0);
+    const z = s.z && s.z.length === n ? s.z : new Array(n).fill(0);
+    t.z = coordsFor(z, 'z', flat, n);
     t.marker = { size: Math.max(1.5, (s.style.size || DEFAULT_SIZE) * 0.6), color, symbol: SYMBOLS_3D[si] };
     t.hovertemplate = `%{x:.6g}, %{y:.6g}, %{z:.6g}<extra>${label}</extra>`;
   } else {
