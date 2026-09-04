@@ -18,8 +18,8 @@ public sealed class Settings
     public string? Language { get; set; }
     /// <summary>Capture device index (mic). Null = system default.</summary>
     public int? MicDevice { get; set; }
-    /// <summary>Render device index (loopback source). Null = system default.</summary>
-    public int? LoopbackDevice { get; set; }
+    // Loopback is intentionally not configurable: recording follows all active
+    // output endpoints, so switching headphones during a meeting is automatic.
     public string OutputDir { get; set; } = ".";
 
     private static readonly JsonSerializerOptions JsonOpts = new()

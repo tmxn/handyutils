@@ -54,8 +54,9 @@ static void PrintUsage()
         Run with no arguments for the interactive TUI.
 
         Commands:
-          devices                          list capture (mic) and render (loopback) devices
-          record [--mic N] [--loopback N] [--out FILE]
+          devices                          list microphone and all audio output devices
+          record [--mic N] [--out FILE]
+                 Captures all active audio output devices automatically.
                  [--rate 48000] [--no-keepalive]
                  Record L=mic, R=speakers to a 2ch WAV. Stop with Ctrl+C or "stop".
           transcribe <wav> [--model M] [--no-diarize] [--language en]
@@ -74,11 +75,10 @@ static int CmdDevices(Settings settings)
     Console.WriteLine("Capture (microphone) devices:");
     foreach (var d in caps) Console.WriteLine("  " + d);
     Console.WriteLine();
-    Console.WriteLine("Render (speaker / loopback source) devices:");
+    Console.WriteLine("Audio output devices captured by loopback:");
     foreach (var d in renders) Console.WriteLine("  " + d);
     Console.WriteLine();
-    Console.WriteLine($"Configured: mic={settings.MicDevice?.ToString() ?? "default"}, " +
-                      $"loopback={settings.LoopbackDevice?.ToString() ?? "default"}");
+    Console.WriteLine($"Configured: mic={settings.MicDevice?.ToString() ?? "default"}, loopback=all active outputs");
     return 0;
 }
 
@@ -109,10 +109,9 @@ static async Task<int> CmdCheck(Settings settings)
         Console.WriteLine($"Mic      {name}");
 
         var renders = AudioDevices.ListRenders();
-        name = settings.LoopbackDevice is null ? "default"
-            : settings.LoopbackDevice < renders.Count ? renders[(int)settings.LoopbackDevice].Name : $"INDEX {settings.LoopbackDevice} (out of range)";
-        if (settings.LoopbackDevice >= renders.Count) ok = false;
-        Console.WriteLine($"Loopback {name}");
+        Console.WriteLine($"Loopback {renders.Count} active output device(s)");
+        foreach (var render in renders)
+            Console.WriteLine($"         {render.Name}");
     }
     catch (Exception ex)
     {
@@ -134,16 +133,17 @@ static async Task<int> CmdCheck(Settings settings)
 
 static int CmdRecord(Settings settings, string[] rest)
 {
-    ParseRecordArgs(settings, rest, out int? micIdx, out int? loopIdx, out string outPath,
+    ParseRecordArgs(settings, rest, out int? micIdx, out string outPath,
         out int rate, out bool keepAlive);
 
     using var recorder = new Recorder(
         AudioDevices.GetCapture(micIdx),
-        AudioDevices.GetRender(loopIdx),
+        AudioDevices.GetRenders(),
         outPath, rate, keepAlive);
 
     Console.WriteLine($"Server: {settings.ServerUrl} (recording does not touch the server)");
-    Console.WriteLine($"Recording L=mic, R=loopback → {Path.GetFullPath(outPath)}");
+    Console.WriteLine($"Recording L=mic, R=all audio outputs → {Path.GetFullPath(outPath)}");
+    Console.WriteLine($"Capturing {recorder.LoopbackDeviceCount} active output device(s).");
     Console.WriteLine("Stop with Ctrl+C or type 'stop'.");
 
     var sw = Stopwatch.StartNew();
@@ -207,7 +207,7 @@ static int CmdRecord(Settings settings, string[] rest)
         return 1;
     }
     Log.Write($"record start → {Path.GetFullPath(outPath)} (rate={rate}, keepalive={keepAlive}, " +
-              $"mic={settings.MicDevice?.ToString() ?? "default"}, loopback={settings.LoopbackDevice?.ToString() ?? "default"})");
+              $"mic={settings.MicDevice?.ToString() ?? "default"}, loopback=all active outputs)");
 
     while (!stopped) Thread.Sleep(100);
     recorder.Stop();
@@ -225,8 +225,9 @@ static int CmdRecord(Settings settings, string[] rest)
 
 static string Meter(float peak, int width)
 {
-    int n = (int)Math.Clamp(peak * width, 0, width);
-    return new string('#', n) + new string('.', width - n) + $" {peak,5:P0}";
+    var displayLevel = LevelMeter.ToDisplay(peak);
+    int n = (int)Math.Clamp(displayLevel * width, 0, width);
+    return new string('#', n) + new string('.', width - n) + $" {displayLevel,5:P0}";
 }
 
 static async Task<int> CmdTranscribe(Settings settings, string[] rest)
@@ -399,10 +400,9 @@ static int CmdMeeting(Settings settings, string[] rest)
 // ---------------------------------------------------------------- helpers
 
 static void ParseRecordArgs(Settings settings, string[] rest,
-    out int? micIdx, out int? loopIdx, out string outPath, out int rate, out bool keepAlive)
+    out int? micIdx, out string outPath, out int rate, out bool keepAlive)
 {
     micIdx = settings.MicDevice;
-    loopIdx = settings.LoopbackDevice;
     outPath = Path.Combine(settings.OutputDir,
         $"meeting-{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.wav");
     rate = 48000;
@@ -413,7 +413,6 @@ static void ParseRecordArgs(Settings settings, string[] rest,
         switch (rest[i])
         {
             case "--mic": micIdx = int.Parse(Next(rest, ref i)); break;
-            case "--loopback": loopIdx = int.Parse(Next(rest, ref i)); break;
             case "--out": outPath = Next(rest, ref i); break;
             case "--rate": rate = int.Parse(Next(rest, ref i)); break;
             case "--no-keepalive": keepAlive = false; break;
@@ -425,10 +424,9 @@ static void ParseRecordArgs(Settings settings, string[] rest,
     if (!string.IsNullOrEmpty(outDir)) Directory.CreateDirectory(outDir);
 
     // Persist last-used device selection
-    if (micIdx != settings.MicDevice || loopIdx != settings.LoopbackDevice)
+    if (micIdx != settings.MicDevice)
     {
         settings.MicDevice = micIdx;
-        settings.LoopbackDevice = loopIdx;
         settings.Save();
     }
 }

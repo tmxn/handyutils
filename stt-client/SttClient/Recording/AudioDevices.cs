@@ -25,13 +25,11 @@ public static class AudioDevices
             : ByIndex(en.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active), index, "capture");
     }
 
-    public static MMDevice GetRender(int? index)
-    {
-        var en = new MMDeviceEnumerator();
-        return index is null
-            ? DefaultEndpoint(en, DataFlow.Render)
-            : ByIndex(en.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active), index, "render");
-    }
+    /// <summary>Returns every active render endpoint for WASAPI loopback capture.</summary>
+    public static List<MMDevice> GetRenders() =>
+        new MMDeviceEnumerator()
+            .EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)
+            .ToList();
 
     /// <summary>
     /// The user's regular "Default Device" (Role.Console — what Windows shows with a

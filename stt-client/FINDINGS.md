@@ -98,10 +98,12 @@ Rule of thumb: expect roughly **1–4 min total per hour of audio** (upload + in
   compression cost client-side, and the server handles it natively. ~350 MB/h is
   trivial for any modern disk. MP3/Opus would save ~15× but buys nothing (the server
   re-decodes to PCM anyway) and adds an encode/decode dependency.
-- Record **two channels** (recommended): left = microphone, right = loopback
-  (headphone/speaker out). Keeps local and remote sides separable for the LLM
-  summarizer and avoids crosstalk being baked into a single mix. 2 ch × 48 kHz ×
-  16 bit ≈ 700 MB/h — still fine. If simpler, a pre-mixed mono track also works
+- Record **two channels** (recommended): left = microphone, right = a mix of
+  all active output-device loopbacks (headphone/speaker out). The client opens
+  every active render endpoint automatically, so switching headphones does not
+  require a selection change. This keeps local and remote sides separable for
+  the LLM summarizer and avoids crosstalk being baked into a single mix. 2 ch ×
+  48 kHz × 16 bit ≈ 700 MB/h — still fine. If simpler, a pre-mixed mono track also works
   (the test file was 48 kHz mono).
 - 44.1/48 kHz are both fine; the model internally downsamples to 16 kHz.
 - Keep it a single file for the whole meeting — one upload, one request, one response.

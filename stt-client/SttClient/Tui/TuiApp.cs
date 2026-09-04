@@ -106,10 +106,10 @@ public static class TuiApp
                                $"language {settings.Language ?? "auto"} · output {Path.GetFullPath(settings.OutputDir)}[/]");
         var choices = new[]
         {
-            new Option(HomeRecord, "record     — capture a meeting (L=mic, R=speakers)"),
+            new Option(HomeRecord, "record     — capture a meeting (L=mic, R=all outputs)"),
             new Option(HomeMeeting, "meeting    — record, then transcribe"),
             new Option(HomeTranscribe, "transcribe — upload a WAV to the server"),
-            new Option(HomeDevices, "devices    — pick mic / loopback device"),
+            new Option(HomeDevices, "devices    — pick microphone (all outputs are automatic)"),
             new Option(HomeConfig, "config     — server URL, model, output dir, ..."),
             new Option(HomeExit, "exit"),
         };
@@ -136,16 +136,15 @@ public static class TuiApp
             AnsiConsole.MarkupLine($"  [dim]{d.Index,3}[/] {mark} {d.Name} [dim]({d.Format})[/]{conf}");
         }
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("[bold]Render (speaker / loopback source) devices:[/]");
+        AnsiConsole.MarkupLine("[bold]Audio output devices captured by loopback:[/]");
         foreach (var d in renders)
         {
             var mark = d.IsDefault ? "[green]*[/]" : " ";
-            var conf = settings.LoopbackDevice == d.Index ? "[cyan] ← configured[/]" : "";
-            AnsiConsole.MarkupLine($"  [dim]{d.Index,3}[/] {mark} {d.Name} [dim]({d.Format})[/]{conf}");
+            AnsiConsole.MarkupLine($"  [dim]{d.Index,3}[/] {mark} {d.Name} [dim]({d.Format})[/]");
         }
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("[dim]* = system default device; selection persists to stt-client.json " +
-                               "in the working directory[/]");
+        AnsiConsole.MarkupLine("[dim]* = system default device. The recording automatically captures " +
+                               "all active outputs, so no headphone selection is needed.[/]");
         AnsiConsole.WriteLine();
 
         var micChoices = new[] { new DeviceOption(null, "system default") }
@@ -156,19 +155,10 @@ public static class TuiApp
             .AddChoices(micChoices)
             .DefaultValue(micChoices.FirstOrDefault(c => c.Index == settings.MicDevice) ?? micChoices[0]));
 
-        var loopChoices = new[] { new DeviceOption(null, "system default") }
-            .Concat(renders.Select(d => new DeviceOption(d.Index, d.Name))).ToList();
-        var loop = AnsiConsole.Prompt(new SelectionPrompt<DeviceOption>()
-            .Title("Loopback source (right channel)")
-            .PageSize(10)
-            .AddChoices(loopChoices)
-            .DefaultValue(loopChoices.FirstOrDefault(c => c.Index == settings.LoopbackDevice) ?? loopChoices[0]));
-
         settings.MicDevice = mic.Index;
-        settings.LoopbackDevice = loop.Index;
         settings.Save();
-        Log.Write($"devices: mic={mic.Index?.ToString() ?? "default"}, loopback={loop.Index?.ToString() ?? "default"}");
-        AnsiConsole.MarkupLine($"[green]Saved.[/] mic = {mic.Label}, loopback = {loop.Label} " +
+        Log.Write($"devices: mic={mic.Index?.ToString() ?? "default"}, loopback=all active outputs");
+        AnsiConsole.MarkupLine($"[green]Saved.[/] mic = {mic.Label}, all active audio outputs will be captured " +
                                "[dim](stt-client.json in the working directory)[/]");
     }
 
@@ -184,7 +174,7 @@ public static class TuiApp
 
         var recorder = new SttClient.Recording.Recorder(
             AudioDevices.GetCapture(settings.MicDevice),
-            AudioDevices.GetRender(settings.LoopbackDevice),
+            AudioDevices.GetRenders(),
             outPath, rate, keepAlive: true);
 
         // Latest meter values (written from the NAudio callback thread, read by the render loop).
@@ -222,7 +212,7 @@ public static class TuiApp
                     return;
                 }
                 Log.Write($"record start (tui) → {outPath} (rate={rate}, " +
-                          $"mic={settings.MicDevice?.ToString() ?? "default"}, loopback={settings.LoopbackDevice?.ToString() ?? "default"})");
+                          $"mic={settings.MicDevice?.ToString() ?? "default"}, loopback=all active outputs)");
 
                 // Spectre has no async key API: read keys on a worker thread while Live renders.
                 keyThread = new Thread(() =>
@@ -284,15 +274,16 @@ public static class TuiApp
         return new Markup(
             $"[bold]Recording[/] [blue]{dur:hh\\:mm\\:ss}[/]  [dim]{sizeMb,6:F1} MB[/]  →  {path}\n" +
             $"  L mic       {Bar(l, 30, "blue")}" + (recorder.MicFailed ? "  [red][mic LOST — continuing on speakers][/]" : "") + "\n" +
-            $"  R speakers  {Bar(r, 30, "green")}" + (recorder.LoopbackFailed ? "  [red][loopback LOST — continuing on mic][/]" : "") + "\n" +
+            $"  R all outputs {Bar(r, 30, "green")}" + (recorder.LoopbackFailed ? "  [red][loopback LOST — continuing on mic][/]" : "") + "\n" +
             $"[dim]Esc / Space / Q to stop · Ctrl+C also stops[/]");
     }
 
     /// <summary>ASCII level meter as markup.</summary>
     private static string Bar(float peak, int width, string color)
     {
-        int n = (int)Math.Clamp(peak * width, 0, width);
-        return $"[{color}]{new string('#', n)}[/][dim]{new string('·', width - n)}[/] [dim]{peak,5:P0}[/]";
+        var displayLevel = LevelMeter.ToDisplay(peak);
+        int n = (int)Math.Clamp(displayLevel * width, 0, width);
+        return $"[{color}]{new string('#', n)}[/][dim]{new string('·', width - n)}[/] [dim]{displayLevel,5:P0}[/]";
     }
 
     // ---------------------------------------------------------------- transcribe

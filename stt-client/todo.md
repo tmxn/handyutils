@@ -5,8 +5,9 @@
 **Implemented and end-to-end verified against the real server.**
 - `dotnet build` succeeds (net8.0, win-x64, NAudio 2.2.1).
 - `devices` enumerates mic + loopback render devices.
-- `record` captures L = mic, R = loopback into one 2ch 48 kHz 16-bit WAV; both
-  channels confirmed live (mic peak 0.82, loopback RMS 0.10 when audio played).
+- `record` captures L = mic and automatically captures all active render devices
+  into the mixed R channel of one 2ch 48 kHz 16-bit WAV; both channels confirmed
+  live (mic peak 0.82, loopback RMS 0.10 when audio played).
   Underruns padded with silence; keep-alive silence keeps the loopback alive.
 - `transcribe` uploads (streamed, no memory blow-up), polls nothing, reads the
   500 body, and writes `*.transcript.txt` (timestamped, speaker-labeled, leading
@@ -61,9 +62,10 @@ for verified server behavior, timing, and response schema.
 ## Decisions (locked)
 
 - **Language/platform:** C# / .NET 8, Windows.
-- **Capture:** NAudio — `WasapiCapture` (mic) + `WasapiLoopbackCapture` (render
-  device), writing both into one 2-channel WAV (L = mic, R = loopback) at a common
-  sample rate (target 48 kHz; resample either stream if devices differ).
+- **Capture:** NAudio — `WasapiCapture` (mic) + one `WasapiLoopbackCapture` for
+  each active render device, mixing all render streams into one 2-channel WAV
+  (L = mic, R = all outputs) at a common sample rate (target 48 kHz; resample
+  streams if devices differ). This avoids choosing the currently active headphone.
 - **Format:** 16-bit PCM WAV. No compression.
 - **Server URL:** configurable (`--server` flag and/or `appsettings.json` /
   `stt-client.json`), default `http://10.11.12.14:8000`. Validate via `GET /health`
@@ -82,12 +84,13 @@ for verified server behavior, timing, and response schema.
   - `SttClient/Stt/` — HTTP client, health, upload, transcript rendering
   - `SttClient/Config/` — settings load/save
 - [ ] `stt-client.json` config: `serverUrl`, `model`, `diarize`, `language`,
-  `micDevice`, `loopbackDevice`, `outputDir`
+  `micDevice`, `outputDir` (all active render devices are captured automatically)
 
 ## Phase 1 — recording core (console)
 
 - [ ] List capture devices (`MMDeviceEnumerator`): show index, name, default flag;
-  select mic + render (loopback source) by index or name from config/args
+  select the mic by index or name from config/args; capture every active render
+  device automatically
 - [ ] Open both streams; verify/negotiate common sample rate + 16-bit + channel
   counts (loopback comes in as 2ch typically → map to R, mic 1ch → L; pad/convert
   as needed)
@@ -144,8 +147,8 @@ for verified server behavior, timing, and response schema.
 - [ ] Home screen: server status (`/health` badge ok/busy/unreachable),
     configured URL, command list (`record`, `transcribe`, `meeting`, `devices`,
     `config`)
-- [ ] `devices` — table of capture/render devices, pick by arrow keys, persists to
-    config
+- [ ] `devices` — table of capture/render devices; pick the mic by arrow keys,
+    while all active render devices are captured automatically
 - [ ] `record` — live display: elapsed time, file size, per-channel peak meter
     (ASCII bar), stop on a key press (Esc/Space)
 - [ ] `meeting` — record → stop → confirm → `transcribe` in one flow

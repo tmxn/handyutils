@@ -5,25 +5,23 @@ using SttClient.Config;
 namespace SttClient.Recording;
 
 /// <summary>
-/// Records the microphone (L) and a render device via WASAPI loopback (R) into
-/// one interleaved 2-channel 16-bit PCM WAV. Underruns on either stream are
-/// padded with silence; a device dying mid-recording is reported, and the other
-/// channel keeps going.
+/// Records the microphone (L) and every active render device via WASAPI loopback
+/// (R) into one interleaved 2-channel 16-bit PCM WAV. Render streams are mixed
+/// into the right channel, with underruns padded with silence; a device dying
+/// mid-recording is reported, and the other streams keep going.
 /// </summary>
 public sealed class Recorder : IDisposable
 {
     private readonly MMDevice _micDevice;
-    private readonly MMDevice _loopbackDevice;
+    private readonly IReadOnlyList<MMDevice> _loopbackDevices;
     private readonly string _path;
     private readonly int _sampleRate;
     private readonly bool _keepAlive;
 
+    private readonly List<LoopbackStream> _loopbacks = new();
     private WaveFileWriter? _writer;
     private WasapiCapture? _mic;
-    private WasapiLoopbackCapture? _loopback;
-    private WasapiOut? _keepAliveOut;
     private ChannelStream? _left;   // mic
-    private ChannelStream? _right;  // loopback
     private CancellationTokenSource? _cts;
     private Task? _writerTask;
     private volatile bool _micFailed, _loopbackFailed;
@@ -34,12 +32,13 @@ public sealed class Recorder : IDisposable
     public TimeSpan Duration => TimeSpan.FromSeconds((double)_samplesWritten / _sampleRate);
     public bool MicFailed => _micFailed;
     public bool LoopbackFailed => _loopbackFailed;
+    public int LoopbackDeviceCount => _loopbackDevices.Count;
 
-    public Recorder(MMDevice micDevice, MMDevice loopbackDevice, string path,
+    public Recorder(MMDevice micDevice, IReadOnlyList<MMDevice> loopbackDevices, string path,
         int sampleRate = 48000, bool keepAlive = true)
     {
         _micDevice = micDevice;
-        _loopbackDevice = loopbackDevice;
+        _loopbackDevices = loopbackDevices.ToList();
         _path = path;
         _sampleRate = sampleRate;
         _keepAlive = keepAlive;
@@ -47,6 +46,9 @@ public sealed class Recorder : IDisposable
 
     public void Start()
     {
+        if (_loopbackDevices.Count == 0)
+            throw new InvalidOperationException("No active audio output devices were found.");
+
         _writer = new WaveFileWriter(_path, new WaveFormat(_sampleRate, 16, 2));
         _cts = new CancellationTokenSource();
 
@@ -62,39 +64,79 @@ public sealed class Recorder : IDisposable
             }
         };
 
-        _loopback = new WasapiLoopbackCapture(_loopbackDevice);
-        _right = new ChannelStream(_loopback.WaveFormat, _sampleRate);
-        _loopback.DataAvailable += LoopbackData;
-        _loopback.RecordingStopped += (s, e) =>
+        foreach (var device in _loopbackDevices)
         {
-            if (e.Exception != null)
-            {
-                _loopbackFailed = true;
-                Console.Error.WriteLine($"[warn] loopback stream stopped: {e.Exception.Message} — continuing on mic only");
-            }
-        };
-
-        // WASAPI loopback quirk: if nothing is playing, no loopback data arrives.
-        // Play a silent stream on the render device to keep the mix alive.
-        if (_keepAlive)
-        {
+            WasapiLoopbackCapture? capture = null;
             try
             {
-                _keepAliveOut = new WasapiOut(_loopbackDevice, AudioClientShareMode.Shared, true, 200);
-                _keepAliveOut.Init(new SilenceProvider(_loopback.WaveFormat));
-                _keepAliveOut.Play();
+                capture = new WasapiLoopbackCapture(device);
+                var state = new LoopbackStream(device, capture, new ChannelStream(capture.WaveFormat, _sampleRate));
+                capture.DataAvailable += (s, e) => LoopbackData(state, e);
+                capture.RecordingStopped += (s, e) =>
+                {
+                    if (e.Exception != null)
+                    {
+                        state.Failed = true;
+                        _loopbackFailed = true;
+                        Console.Error.WriteLine($"[warn] loopback '{device.FriendlyName}' stopped: " +
+                            $"{e.Exception.Message} — continuing on other outputs");
+                    }
+                };
+
+                // WASAPI loopback quirk: if nothing is playing, no loopback data arrives.
+                // Play a silent stream on each render device to keep every mix alive.
+                if (_keepAlive)
+                {
+                    try
+                    {
+                        state.KeepAlive = new WasapiOut(device, AudioClientShareMode.Shared, true, 200);
+                        state.KeepAlive.Init(new SilenceProvider(capture.WaveFormat));
+                        state.KeepAlive.Play();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"[warn] silence keep-alive failed for '{device.FriendlyName}' " +
+                            $"({ex.Message}); loopback may be silent while no audio is playing");
+                        state.KeepAlive = null;
+                    }
+                }
+
+                _loopbacks.Add(state);
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[warn] silence keep-alive failed ({ex.Message}); " +
-                    "loopback may be silent while no audio is playing");
-                _keepAliveOut = null;
+                try { capture?.Dispose(); } catch { }
+                _loopbackFailed = true;
+                Console.Error.WriteLine($"[warn] could not open loopback '{device.FriendlyName}': {ex.Message}");
             }
         }
 
+        if (_loopbacks.Count == 0)
+            throw new InvalidOperationException("Could not open any audio output device for loopback capture.");
+
         _writerTask = Task.Run(() => WriterLoop(_cts.Token));
-        _loopback.StartRecording();
-        _mic.StartRecording();
+
+        try { _mic.StartRecording(); }
+        catch
+        {
+            _micFailed = true;
+            throw;
+        }
+
+        foreach (var state in _loopbacks)
+        {
+            try { state.Capture.StartRecording(); }
+            catch (Exception ex)
+            {
+                state.Failed = true;
+                _loopbackFailed = true;
+                Console.Error.WriteLine($"[warn] could not start loopback '{state.Device.FriendlyName}': " +
+                    $"{ex.Message} — continuing on other outputs");
+            }
+        }
+
+        if (_loopbacks.All(s => s.Failed))
+            throw new InvalidOperationException("Could not start loopback capture on any audio output device.");
     }
 
     private void MicData(object? sender, WaveInEventArgs e)
@@ -107,13 +149,15 @@ public sealed class Recorder : IDisposable
         }
     }
 
-    private void LoopbackData(object? sender, WaveInEventArgs e)
+    private void LoopbackData(LoopbackStream state, WaveInEventArgs e)
     {
-        try { _right!.Add(e.Buffer, e.BytesRecorded); }
+        try { state.Channel.Add(e.Buffer, e.BytesRecorded); }
         catch (Exception ex)
         {
+            state.Failed = true;
             _loopbackFailed = true;
-            Console.Error.WriteLine($"[warn] loopback stream error: {ex.Message} — continuing with silence");
+            Console.Error.WriteLine($"[warn] loopback '{state.Device.FriendlyName}' stream error: " +
+                $"{ex.Message} — continuing with other outputs");
         }
     }
 
@@ -123,6 +167,7 @@ public sealed class Recorder : IDisposable
         int expected = _sampleRate * periodMs / 1000;
         var left = new float[expected];
         var right = new float[expected];
+        var source = new float[expected];
         var pcm = new byte[expected * 4];
         float leftPeak = 0, rightPeak = 0;
         var lastMeter = Environment.TickCount64;
@@ -130,13 +175,29 @@ public sealed class Recorder : IDisposable
         while (!ct.IsCancellationRequested)
         {
             leftPeak = _left!.Drain(expected, left);
-            rightPeak = _right!.Drain(expected, right);
+            Array.Clear(right, 0, right.Length);
+            foreach (var state in _loopbacks)
+            {
+                state.Channel.Drain(expected, source);
+                for (int i = 0; i < expected; i++)
+                    right[i] += source[i];
+            }
+
+            // Each endpoint is captured so recording follows whichever output is
+            // in use. The expected setup has one endpoint carrying audio at a time,
+            // so sum the streams without attenuating the active one.
+            rightPeak = 0;
             for (int i = 0; i < expected; i++)
             {
-                pcm[i * 4] = (byte)(short)Math.Clamp(left[i] * 32767f, -32768, 32767);
-                pcm[i * 4 + 1] = (byte)((short)Math.Clamp(left[i] * 32767f, -32768, 32767) >> 8);
-                pcm[i * 4 + 2] = (byte)(short)Math.Clamp(right[i] * 32767f, -32768, 32767);
-                pcm[i * 4 + 3] = (byte)((short)Math.Clamp(right[i] * 32767f, -32768, 32767) >> 8);
+                right[i] = Math.Clamp(right[i], -1f, 1f);
+                rightPeak = Math.Max(rightPeak, Math.Abs(right[i]));
+
+                short l = (short)Math.Clamp(left[i] * 32767f, -32768, 32767);
+                short r = (short)Math.Clamp(right[i] * 32767f, -32768, 32767);
+                pcm[i * 4] = (byte)l;
+                pcm[i * 4 + 1] = (byte)(l >> 8);
+                pcm[i * 4 + 2] = (byte)r;
+                pcm[i * 4 + 3] = (byte)(r >> 8);
             }
             _writer!.Write(pcm, 0, pcm.Length);
             _samplesWritten += expected;
@@ -157,17 +218,24 @@ public sealed class Recorder : IDisposable
     {
         if (_cts == null) return;
         try { _mic?.StopRecording(); } catch { }
-        try { _loopback?.StopRecording(); } catch { }
+        foreach (var state in _loopbacks)
+        {
+            try { state.Capture.StopRecording(); } catch { }
+        }
         _cts.Cancel();
         try { _writerTask?.Wait(TimeSpan.FromSeconds(5)); } catch { }
-        try
+
+        foreach (var state in _loopbacks)
         {
-            if (_keepAliveOut != null) { _keepAliveOut.Stop(); _keepAliveOut.Dispose(); }
+            try { state.KeepAlive?.Stop(); } catch { }
+            try { state.KeepAlive?.Dispose(); } catch { }
         }
-        catch { }
         try { _writer?.Dispose(); } catch { } // Dispose flushes the WAV header
         try { _mic?.Dispose(); } catch { }
-        try { _loopback?.Dispose(); } catch { }
+        foreach (var state in _loopbacks)
+        {
+            try { state.Capture.Dispose(); } catch { }
+        }
     }
 
     public void Dispose()
@@ -175,7 +243,24 @@ public sealed class Recorder : IDisposable
         Stop();
         _cts?.Dispose();
         _micDevice.Dispose();
-        _loopbackDevice.Dispose();
+        foreach (var device in _loopbackDevices)
+            device.Dispose();
+    }
+
+    private sealed class LoopbackStream
+    {
+        public MMDevice Device { get; }
+        public WasapiLoopbackCapture Capture { get; }
+        public ChannelStream Channel { get; }
+        public WasapiOut? KeepAlive { get; set; }
+        public volatile bool Failed;
+
+        public LoopbackStream(MMDevice device, WasapiLoopbackCapture capture, ChannelStream channel)
+        {
+            Device = device;
+            Capture = capture;
+            Channel = channel;
+        }
     }
 
     /// <summary>Zero-filled provider of the device mix format (keeps loopback alive).</summary>
