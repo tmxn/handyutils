@@ -9,7 +9,7 @@ using SttClient.Stt;
 
 var cliArgs = Environment.GetCommandLineArgs()[1..];
 var settings = Settings.Load();
-Log.Init(settings.OutputDir);
+Log.Init(settings.ResolvedOutputDir);
 
 if (cliArgs.Length == 0)
 {
@@ -119,7 +119,7 @@ static async Task<int> CmdCheck(Settings settings)
         ok = false;
     }
 
-    var dir = Path.GetFullPath(settings.OutputDir);
+    var dir = settings.ResolvedOutputDir;
     if (Directory.Exists(dir))
         Console.WriteLine($"Output   {dir}");
     else
@@ -264,7 +264,7 @@ static async Task<int> CmdTranscribe(Settings settings, string[] rest)
     if (health == Health.Unreachable)
     {
         Console.Error.WriteLine($"Server {settings.ServerUrl} is UNREACHABLE. " +
-                                "Check the network and 'serverUrl' in stt-client.json.");
+                                $"Check the network and 'serverUrl' in {Path.Combine(Settings.DataDirectory, Settings.FileName)}.");
         return 1;
     }
     if (health == Health.Busy)
@@ -380,7 +380,7 @@ static int CmdMeeting(Settings settings, string[] rest)
         return 0;
     }
     // Find the file we just wrote (most recent in output dir)
-    var dir = Path.GetFullPath(settings.OutputDir);
+    var dir = settings.ResolvedOutputDir;
     if (!Directory.Exists(dir))
     {
         Console.Error.WriteLine($"Output dir not found: {dir}");
@@ -403,7 +403,7 @@ static void ParseRecordArgs(Settings settings, string[] rest,
     out int? micIdx, out string outPath, out int rate, out bool keepAlive)
 {
     micIdx = settings.MicDevice;
-    outPath = Path.Combine(settings.OutputDir,
+    outPath = Path.Combine(settings.ResolvedOutputDir,
         $"meeting-{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.wav");
     rate = 48000;
     keepAlive = true;
@@ -420,7 +420,10 @@ static void ParseRecordArgs(Settings settings, string[] rest,
         }
     }
 
-    var outDir = Path.GetDirectoryName(Path.GetFullPath(outPath));
+    // Relative output names stay inside the app data directory rather than the
+    // launcher's working directory. Absolute paths remain supported.
+    outPath = settings.ResolveOutputPath(outPath);
+    var outDir = Path.GetDirectoryName(outPath);
     if (!string.IsNullOrEmpty(outDir)) Directory.CreateDirectory(outDir);
 
     // Persist last-used device selection

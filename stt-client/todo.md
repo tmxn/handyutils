@@ -12,7 +12,7 @@
 - `transcribe` uploads (streamed, no memory blow-up), polls nothing, reads the
   500 body, and writes `*.transcript.txt` (timestamped, speaker-labeled, leading
   spaces stripped) + `*.transcript.json` (raw word-level data). Verified on real
-  speech.
+  speech. By default, recordings, transcripts, and logs go under `~/.stt-client`.
 - Known gotchas fixed during testing: WAV duration parses only after `RIFF <size>`
   + `WAVE`; the `/health` timeout is isolated from the long POST (infinite client
   timeout + per-call cancellation).
@@ -22,7 +22,7 @@
 - [x] `dotnet new console` → `SttClient/`, .NET 8
 - [x] NuGet: `NAudio`
 - [x] Solution layout: `SttClient/` (Program.cs), `Recording/`, `Stt/`, `Config/`
-- [x] `stt-client.json` config load/save
+- [x] `~/.stt-client/stt-client.json` config load/save (independent of launcher working directory)
 - [x] `devices` enumeration (index, default, format)
 - [x] Dual-stream capture → interleaved 2ch WAV; common rate; per-channel silence padding
 - [x] `record` (stop on Ctrl+C or `stop`); header flush on dispose
@@ -40,6 +40,7 @@
 - [x] Phase 3 hardening (self-check via `check` command, auto-retry on network/timeout
       failures ×3 with idempotent re-POST, config persistence of last devices, Ctrl+C
       cancels upload cleanly, logging to `stt-client.log` in the output dir)
+- [x] Store config, recordings, transcripts, and logs under `~/.stt-client` by default
 - [x] Single-file self-contained publish: `publish/stt-client.exe` (68 MB, runtime bundled, runs standalone)
 - [x] Phase 4 TUI (`stt-client tui`, Spectre.Console 0.57.2): home screen with server
       status badge, device picker (persists), live record display (meters, size, Esc/Space
@@ -67,8 +68,9 @@ for verified server behavior, timing, and response schema.
   (L = mic, R = all outputs) at a common sample rate (target 48 kHz; resample
   streams if devices differ). This avoids choosing the currently active headphone.
 - **Format:** 16-bit PCM WAV. No compression.
-- **Server URL:** configurable (`--server` flag and/or `appsettings.json` /
-  `stt-client.json`), default `http://10.11.12.14:8000`. Validate via `GET /health`
+- **Server URL:** configurable (`--server` flag and/or
+  `~/.stt-client/stt-client.json`), default `http://10.11.12.14:8000`.
+  Validate via `GET /health`
   at startup: distinguish unreachable / down / busy.
 - **Phasing:** plain console core first (usable end-to-end), then a TUI layer
   on top (Spectre.Console — live displays, level meters, progress, transcript

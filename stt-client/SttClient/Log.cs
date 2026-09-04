@@ -16,7 +16,11 @@ public static class Log
         if (string.IsNullOrWhiteSpace(dir)) return;
         lock (Gate)
         {
-            try { _path = Path.Combine(dir, "stt-client.log"); }
+            try
+            {
+                Directory.CreateDirectory(dir);
+                _path = Path.Combine(dir, "stt-client.log");
+            }
             catch { _path = null; }
         }
     }

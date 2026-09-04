@@ -103,7 +103,7 @@ public static class TuiApp
         };
         AnsiConsole.MarkupLine($"[bold]stt-client[/]  [dim]server[/] {settings.ServerUrl} {badge}");
         AnsiConsole.MarkupLine($"[dim]model {settings.Model} · diarize {settings.Diarize} · " +
-                               $"language {settings.Language ?? "auto"} · output {Path.GetFullPath(settings.OutputDir)}[/]");
+                               $"language {settings.Language ?? "auto"} · output {settings.ResolvedOutputDir}[/]");
         var choices = new[]
         {
             new Option(HomeRecord, "record     — capture a meeting (L=mic, R=all outputs)"),
@@ -167,7 +167,7 @@ public static class TuiApp
     /// <summary>Live recording display. Returns the WAV path, or null if aborted/failed.</summary>
     private static Task<string?> RecordAsync(Settings settings)
     {
-        var dir = Path.GetFullPath(settings.OutputDir);
+        var dir = settings.ResolvedOutputDir;
         Directory.CreateDirectory(dir);
         var outPath = Path.Combine(dir, $"meeting-{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.wav");
         const int rate = 48000;
@@ -440,7 +440,7 @@ public static class TuiApp
 
     private static async Task<string?> PickFileAsync(Settings settings)
     {
-        var dir = Path.GetFullPath(settings.OutputDir);
+        var dir = settings.ResolvedOutputDir;
         var wavs = Directory.Exists(dir)
             ? Directory.GetFiles(dir, "*.wav")
                 .OrderByDescending(File.GetLastWriteTimeUtc)
@@ -528,14 +528,14 @@ public static class TuiApp
         settings.Diarize = AnsiConsole.Confirm("Diarize speakers? (labels like SPEAKER_00)", settings.Diarize);
         var lang = AnsiConsole.Prompt(new TextPrompt<string>("Language (blank = auto-detect)").AllowEmpty());
         settings.Language = string.IsNullOrWhiteSpace(lang) ? null : lang.Trim();
-        var outDir = AnsiConsole.Prompt(new TextPrompt<string>("Output dir").AllowEmpty());
+        var outDir = AnsiConsole.Prompt(new TextPrompt<string>("Output dir (blank keeps current)").AllowEmpty());
         if (outDir.Length > 0) settings.OutputDir = outDir;
 
         settings.Save();
-        Log.Init(settings.OutputDir); // log now points at the (possibly new) output dir
+        Log.Init(settings.ResolvedOutputDir); // log now points at the (possibly new) output dir
         Log.Write($"config saved: server={settings.ServerUrl} model={settings.Model} " +
-                  $"diarize={settings.Diarize} language={settings.Language ?? "auto"} output={settings.OutputDir}");
-        AnsiConsole.MarkupLine("[green]Saved to stt-client.json.[/]");
+                  $"diarize={settings.Diarize} language={settings.Language ?? "auto"} output={settings.ResolvedOutputDir}");
+        AnsiConsole.MarkupLine($"[green]Saved to {Path.Combine(Settings.DataDirectory, Settings.FileName)}.[/]");
     }
 }
 

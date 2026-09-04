@@ -94,6 +94,9 @@ Rule of thumb: expect roughly **1–4 min total per hour of audio** (upload + in
 
 ## Audio format guidance for the recorder
 
+- Client config, recordings, transcripts, and logs default to `~/.stt-client`,
+  not the launcher's working directory. An absolute output directory can still
+  be configured.
 - **WAV (PCM 16-bit) is the right call**: lossless, universally decodable, no
   compression cost client-side, and the server handles it natively. ~350 MB/h is
   trivial for any modern disk. MP3/Opus would save ~15× but buys nothing (the server
