@@ -57,6 +57,9 @@ public sealed class GpuMonitorForm : Form
     bool _wasIdlePoking;
     Point _dragOffset;
 
+    DynamicPinWatcher? _pinWatcher;
+    KeeperTrayIcon? _tray;
+
     public GpuMonitorForm()
     {
         _core = new KeeperCore();
@@ -64,6 +67,7 @@ public sealed class GpuMonitorForm : Form
         BuildUi();
         LoadSettings();
         PopulateGpuList();
+        StartPinWatcher();
 
         _timer = new System.Windows.Forms.Timer { Interval = 1000 };
         _timer.Tick += OnTick;
@@ -266,6 +270,10 @@ public sealed class GpuMonitorForm : Form
         _readyToShow = true;
         bool wasShowing = _isActive;
 
+        // The re-pin watcher runs on the thread pool; this is the UI thread it borrows
+        // to raise its balloon tips.
+        _tray?.PumpPending();
+
         // Only the UI reads VRAM/load, and only while visible: the PDH counters
         // are torn down the moment we hide. Sample before the keeper tick so the
         // post-exit poke suppression can use the latest usage.
@@ -401,6 +409,27 @@ public sealed class GpuMonitorForm : Form
         ClientSize = sz;
     }
 
+    /// <summary>
+    /// Brings up the tray icon and the re-pinning watcher. The keeper is the right home
+    /// for this because it is the only piece that is always running: GPU preferences are
+    /// read at process start, so an app that updates in the background has to be re-pinned
+    /// before its next launch, not the next time a GUI happens to be opened.
+    /// </summary>
+    void StartPinWatcher()
+    {
+        try
+        {
+            _pinWatcher = new DynamicPinWatcher();
+            _tray = new KeeperTrayIcon(_pinWatcher);
+            _pinWatcher.Start();
+        }
+        catch
+        {
+            // The keep-alive half of the keeper must survive a broken rules file or an
+            // unavailable tray, so failures here are not fatal.
+        }
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
@@ -408,6 +437,8 @@ public sealed class GpuMonitorForm : Form
             _timer.Dispose();
             _gpuMenu.Dispose();
             _monitor?.Dispose();
+            _tray?.Dispose();
+            _pinWatcher?.Dispose();
         }
         base.Dispose(disposing);
     }
