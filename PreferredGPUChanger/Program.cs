@@ -183,7 +183,12 @@ public class MainManagerForm : Form
                 _processGrid.Rows.Clear();
                 foreach (object[] row in rows)
                 {
-                    _processGrid.Rows.Add(row[0], row[1], row[2], row[3], row[4], row[5]);
+                    int index = _processGrid.Rows.Add(row[0], row[1], row[2], row[3], row[4], row[5]);
+                    // row[6] is the registry value name Windows actually honours for this
+                    // process (AUMID for packaged apps, path otherwise). The grid shows the
+                    // path because that is what the user recognises; the rule is written
+                    // against the tag.
+                    _processGrid.Rows[index].Tag = row[6];
                 }
             }
             finally
@@ -228,18 +233,23 @@ public class MainManagerForm : Form
             if (gfxOnly && !mapsGraphics) continue;
             if (proc.Id == 0 || proc.Id == 4) continue; // Skip Idle and System
 
+            // Packaged apps are keyed by AUMID, not by path — looking up the path would
+            // report "unmanaged" for an app that is in fact correctly pinned.
+            string ruleKey = GpuPreferenceKey.ForProcess(proc, exePath);
+
             string activeRegistryRule = "None (System Managed)";
             if (exePath != "Unknown (Access Denied)")
             {
-                var val = regKey?.GetValue(exePath);
+                var val = regKey?.GetValue(ruleKey);
                 if (val != null)
                 {
-                    activeRegistryRule = val.ToString() switch
+                    string label = val.ToString() switch
                     {
                         "GpuPreference=1;" => "iGPU (Power Saving)",
                         "GpuPreference=2;" => "7900 GRE (High Perf)",
                         _ => val.ToString() ?? "Custom"
                     };
+                    activeRegistryRule = GpuPreferenceKey.IsAumid(ruleKey) ? $"{label} [AUMID]" : label;
                 }
             }
 
@@ -250,7 +260,8 @@ public class MainManagerForm : Form
                 (proc.WorkingSet64 / 1024 / 1024).ToString("N0"),
                 mapsGraphics ? "YES" : "No",
                 activeRegistryRule,
-                exePath
+                exePath,
+                ruleKey
             });
         }
 
@@ -265,9 +276,9 @@ public class MainManagerForm : Form
             return;
         }
 
-        string path = _processGrid.SelectedRows[0].Cells["Path"].Value.ToString() ?? "";
-        bool isValidPath = !string.IsNullOrEmpty(path) && !path.StartsWith("Unknown");
-        ToggleActionButtons(isValidPath);
+        string key = SelectedRuleKey();
+        bool isValidKey = !string.IsNullOrEmpty(key) && !key.StartsWith("Unknown");
+        ToggleActionButtons(isValidKey);
     }
 
     private void ToggleActionButtons(bool enabled)
@@ -277,28 +288,42 @@ public class MainManagerForm : Form
         _clearPrefBtn.Enabled = enabled;
     }
 
+    /// <summary>
+    /// The registry value name for the selected row: an AUMID for packaged apps, an
+    /// executable path otherwise. Never write the raw path — Windows ignores path
+    /// entries for packaged apps, and the WindowsApps path changes on every update.
+    /// </summary>
+    private string SelectedRuleKey()
+        => _processGrid.SelectedRows.Count == 0
+            ? ""
+            : _processGrid.SelectedRows[0].Tag as string ?? "";
+
     private void ApplyGpuRule(string ruleValue)
     {
-        if (_processGrid.SelectedRows.Count == 0) return;
-        string exePath = _processGrid.SelectedRows[0].Cells["Path"].Value.ToString() ?? "";
+        string ruleKey = SelectedRuleKey();
+        if (string.IsNullOrEmpty(ruleKey) || ruleKey.StartsWith("Unknown")) return;
 
         using (RegistryKey key = Registry.CurrentUser.CreateSubKey(RegPath))
         {
-            key.SetValue(exePath, ruleValue, RegistryValueKind.String);
+            key.SetValue(ruleKey, ruleValue, RegistryValueKind.String);
         }
 
-        MessageBox.Show($"Successfully locked preference for:\n{Path.GetFileName(exePath)}\nChanges take effect next time the application launches.", "Registry Injected", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        string what = GpuPreferenceKey.IsAumid(ruleKey) ? ruleKey : Path.GetFileName(ruleKey);
+        string note = GpuPreferenceKey.IsAumid(ruleKey)
+            ? "\n\nKeyed by AUMID, so it survives app updates."
+            : "";
+        MessageBox.Show($"Successfully locked preference for:\n{what}\nChanges take effect next time the application launches.{note}", "Registry Injected", MessageBoxButtons.OK, MessageBoxIcon.Information);
         LoadProcessList();
     }
 
     private void RemoveGpuRule()
     {
-        if (_processGrid.SelectedRows.Count == 0) return;
-        string exePath = _processGrid.SelectedRows[0].Cells["Path"].Value.ToString() ?? "";
+        string ruleKey = SelectedRuleKey();
+        if (string.IsNullOrEmpty(ruleKey)) return;
 
         using (RegistryKey? key = Registry.CurrentUser.OpenSubKey(RegPath, true))
         {
-            key?.DeleteValue(exePath, false);
+            key?.DeleteValue(ruleKey, false);
         }
         LoadProcessList();
     }
