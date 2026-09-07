@@ -24,7 +24,10 @@ static class Program
 
 public class MainManagerForm : Form
 {
+    private TabControl _tabControl = null!;
     private DataGridView _processGrid = null!;
+    private DataGridView _gpuGrid = null!;
+    private Label _gpuTotalLabel = null!;
     private NumericUpDown _ramFilterInput = null!;
     private CheckBox _gfxFilterCheckbox = null!;
     private Button _refreshBtn = null!;
@@ -53,6 +56,7 @@ public class MainManagerForm : Form
         {
             UpdateVramDisplay();
             LoadProcessList();
+            LoadGpuProcessList();
         }
         catch (Exception ex)
         {
@@ -78,7 +82,7 @@ public class MainManagerForm : Form
 
         _gfxFilterCheckbox = new CheckBox { Text = "Graphics Engine Apps Only (DXGI/D3D/Vulkan)", Top = 14, Left = 190, AutoSize = true, Checked = false };
         _refreshBtn = new Button { Text = "Refresh Process Tree", Top = 10, Left = 520, Width = 150, Height = 28 };
-        _refreshBtn.Click += (s, e) => _ = Task.Run(LoadProcessList);
+        _refreshBtn.Click += (s, e) => _ = Task.Run(() => { LoadProcessList(); LoadGpuProcessList(); });
 
         _vramLabel = new Label { Text = "VRAM: querying...", Top = 16, Left = 690, AutoSize = true, ForeColor = Color.DarkSlateGray };
 
@@ -130,7 +134,75 @@ public class MainManagerForm : Form
         _processGrid.Columns["GfxHooks"].Width = 120;
         _processGrid.SelectionChanged += OnGridSelectionChanged;
 
-        this.Controls.AddRange(new Control[] { _processGrid, topPanel, bottomPanel });
+        // Discrete-GPU tab: processes actually holding dedicated VRAM on the dGPU.
+        _gpuGrid = new DataGridView
+        {
+            Dock = DockStyle.Fill,
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            MultiSelect = false,
+            AllowUserToAddRows = false,
+            ReadOnly = true,
+            RowHeadersVisible = false,
+            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+            BackgroundColor = Color.White
+        };
+        _gpuGrid.Columns.Add("GpuProcName", "Process Name");
+        _gpuGrid.Columns.Add("GpuPid", "PID");
+        _gpuGrid.Columns.Add("GpuDedicated", "Dedicated VRAM (MB)");
+        _gpuGrid.Columns["GpuPid"].Width = 70;
+        _gpuGrid.Columns["GpuDedicated"].Width = 150;
+        _gpuGrid.SelectionChanged += (s, e) => ToggleActionButtons(false);
+
+        _gpuTotalLabel = new Label
+        {
+            Dock = DockStyle.Bottom,
+            Height = 24,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font = new Font(this.Font, FontStyle.Bold),
+            ForeColor = Color.DarkSlateGray,
+            Text = "Querying discrete GPU processes..."
+        };
+
+        var processTab = new TabPage("Process List");
+        processTab.Controls.Add(_processGrid);
+
+        var gpuTab = new TabPage("Discrete GPU");
+        gpuTab.Controls.Add(_gpuGrid);
+        gpuTab.Controls.Add(_gpuTotalLabel);
+
+        _tabControl = new TabControl { Dock = DockStyle.Fill };
+        _tabControl.TabPages.Add(processTab);
+        _tabControl.TabPages.Add(gpuTab);
+
+        this.Controls.AddRange(new Control[] { _tabControl, topPanel, bottomPanel });
+    }
+
+    private void LoadGpuProcessList()
+    {
+        var rows = GpuProcessReader.GetDiscreteGpuProcesses();
+        if (this.IsDisposed) return;
+        this.Invoke(() =>
+        {
+            _gpuGrid.SuspendLayout();
+            try
+            {
+                _gpuGrid.Rows.Clear();
+                double totalMb = 0;
+                foreach (var row in rows)
+                {
+                    totalMb += row.DedicatedMb;
+                    _gpuGrid.Rows.Add(row.ProcessName, row.Pid, row.DedicatedMb.ToString("N1"));
+                }
+
+                _gpuTotalLabel.Text = rows.Count == 0
+                    ? "No processes currently using dedicated VRAM on the discrete GPU."
+                    : $"{rows.Count} process(es) on the discrete GPU — {totalMb:N0} MB dedicated total";
+            }
+            finally
+            {
+                _gpuGrid.ResumeLayout();
+            }
+        });
     }
 
     private void UpdateVramDisplay()

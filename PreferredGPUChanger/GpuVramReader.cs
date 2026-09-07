@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 namespace GpuVramMonitor;
 
@@ -33,6 +34,12 @@ public static class GpuVramReader
     // Lazily-built state: one usage counter per physical GPU, plus a friendly name.
     private static List<(PerformanceCounter Usage, string Name)>? _gpus;
     private static bool _initialized;
+    // Adapter instance names (e.g. "luid_0x00000000_0x834815e3_phys_0") for the
+    // physical GPUs selected above, kept so the discrete GPU's LUID can be recovered.
+    private static string[] _selectedInstances = [];
+
+    private static readonly Regex InstanceLuidRegex = new(
+        @"^luid_(0x[0-9a-f]+)_(0x[0-9a-f]+)_phys_", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>
     /// Returns dedicated VRAM usage for each physical GPU (filtered, virtual GPUs excluded).
@@ -50,7 +57,7 @@ public static class GpuVramReader
         }
 
         var results = new List<GpuVramInfo>();
-        for (int i = 0; i < _gpus.Count; i++)
+        for (int i = 0; i < _gpus!.Count; i++)
         {
             float usageBytes = _gpus[i].Usage.NextValue();
             results.Add(new GpuVramInfo
@@ -105,6 +112,8 @@ public static class GpuVramReader
             .Take(physicalGpuCount)
             .ToList();
 
+        _selectedInstances = selected.Select(x => x.Instance).ToArray();
+
         // 4. Wrap each selected instance's usage counter with a friendly display name.
         var result = new List<(PerformanceCounter, string)>();
         for (int i = 0; i < selected.Count; i++)
@@ -115,6 +124,31 @@ public static class GpuVramReader
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Returns the LUID pair (low, high) of the discrete GPU, identified as the physical
+    /// adapter with the largest committed VRAM — the same heuristic the VRAM label uses
+    /// to order the adapters. Null if no physical GPU was detected.
+    /// </summary>
+    public static (string Low, string High)? GetDiscreteGpuLuid()
+    {
+        if (!_initialized)
+        {
+            Initialize();
+        }
+
+        if (_selectedInstances.Length == 0)
+        {
+            return null;
+        }
+
+        string bestInstance = _selectedInstances
+            .OrderByDescending(inst => ReadCommittedBytes(inst))
+            .First();
+
+        var m = InstanceLuidRegex.Match(bestInstance);
+        return m.Success ? (m.Groups[1].Value, m.Groups[2].Value) : null;
     }
 
     /// <summary>
