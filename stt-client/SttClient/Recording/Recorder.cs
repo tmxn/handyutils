@@ -163,23 +163,36 @@ public sealed class Recorder : IDisposable
 
     private void WriterLoop(CancellationToken ct)
     {
-        const int periodMs = 10;
-        int expected = _sampleRate * periodMs / 1000;
-        var left = new float[expected];
-        var right = new float[expected];
-        var source = new float[expected];
-        var pcm = new byte[expected * 4];
+        // Buffers sized for ~1 s of audio: enough to drain fast when the queue
+        // has built up, so the writer never falls behind the realtime feed.
+        int max = _sampleRate;
+        var left = new float[max];
+        var right = new float[max];
+        var source = new float[max];
+        var pcm = new byte[max * 4];
         float leftPeak = 0, rightPeak = 0;
         var lastMeter = Environment.TickCount64;
 
         while (!ct.IsCancellationRequested)
         {
-            leftPeak = _left!.Drain(expected, left);
-            Array.Clear(right, 0, right.Length);
+            // All channels run at the target rate, so take the deepest queue.
+            int n = 0;
+            if (_left != null) n = Math.Max(n, _left.QueuedSamples);
+            foreach (var state in _loopbacks)
+                n = Math.Max(n, state.Channel.QueuedSamples);
+            if (n == 0)
+            {
+                Thread.Sleep(5);
+                continue;
+            }
+            n = Math.Min(n, max);
+
+            leftPeak = _left!.Drain(n, left);
+            Array.Clear(right, 0, n);
             foreach (var state in _loopbacks)
             {
-                state.Channel.Drain(expected, source);
-                for (int i = 0; i < expected; i++)
+                state.Channel.Drain(n, source);
+                for (int i = 0; i < n; i++)
                     right[i] += source[i];
             }
 
@@ -187,7 +200,7 @@ public sealed class Recorder : IDisposable
             // in use. The expected setup has one endpoint carrying audio at a time,
             // so sum the streams without attenuating the active one.
             rightPeak = 0;
-            for (int i = 0; i < expected; i++)
+            for (int i = 0; i < n; i++)
             {
                 right[i] = Math.Clamp(right[i], -1f, 1f);
                 rightPeak = Math.Max(rightPeak, Math.Abs(right[i]));
@@ -199,16 +212,32 @@ public sealed class Recorder : IDisposable
                 pcm[i * 4 + 2] = (byte)r;
                 pcm[i * 4 + 3] = (byte)(r >> 8);
             }
-            _writer!.Write(pcm, 0, pcm.Length);
-            _samplesWritten += expected;
+            _writer!.Write(pcm, 0, n * 4);
+            _samplesWritten += n;
 
             if (Environment.TickCount64 - lastMeter >= 500)
             {
                 lastMeter = Environment.TickCount64;
                 OnMeter?.Invoke(_samplesWritten, leftPeak, rightPeak);
             }
-            Thread.Sleep(periodMs);
+
+            // Pace only when caught up; when the queue has a backlog (loop
+            // overhead, brief stalls) run flat-out so nothing accumulates.
+            int queued = _left.QueuedSamples;
+            foreach (var state in _loopbacks)
+                queued += state.Channel.QueuedSamples;
+            if (queued <= _sampleRate / 10)
+                Thread.Sleep(5);
         }
+    }
+
+    private int TotalQueued()
+    {
+        int queued = 0;
+        if (_left != null) queued += _left.QueuedSamples;
+        foreach (var state in _loopbacks)
+            queued += state.Channel.QueuedSamples;
+        return queued;
     }
 
     /// <summary>Raised ~2×/sec with total samples written and per-channel peaks (0..1).</summary>
@@ -222,6 +251,15 @@ public sealed class Recorder : IDisposable
         {
             try { state.Capture.StopRecording(); } catch { }
         }
+
+        // StopRecording() joins each capture thread, so all DataAvailable
+        // callbacks have fired by now — the queues hold the final data.
+        // Give the writer a bounded chance to drain whatever remains (it runs
+        // unpaced when behind) before cancelling, so no tail is dropped.
+        var deadline = Environment.TickCount64 + 5000;
+        while (Environment.TickCount64 < deadline && TotalQueued() > 0)
+            Thread.Sleep(10);
+
         _cts.Cancel();
         try { _writerTask?.Wait(TimeSpan.FromSeconds(5)); } catch { }
 
