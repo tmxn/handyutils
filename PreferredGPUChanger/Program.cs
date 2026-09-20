@@ -34,6 +34,8 @@ public class MainManagerForm : Form
     private Button _assignIgpuBtn = null!;
     private Button _assignDgpuBtn = null!;
     private Button _clearPrefBtn = null!;
+    private Button _killBtn = null!;
+    private Button _assignIgpuGpuBtn = null!;
     private Button _toggleKeeperBtn = null!;
     private Label _keeperStatusLabel = null!;
     private Label _vramLabel = null!;
@@ -50,12 +52,20 @@ public class MainManagerForm : Form
         _ = Task.Run(LoadInitialData);
     }
 
-    private void LoadInitialData()
+    private async Task LoadInitialData()
     {
         try
         {
             UpdateVramDisplay();
             LoadProcessList();
+
+            // The per-process "Dedicated Usage" counter reports 0 on its first sample and
+            // only yields real values once the PDH query has been open for an interval.
+            // Prime the counters now, then read a beat later so the first paint of the VRAM
+            // view is already populated instead of empty. (The 1s status timer keeps it
+            // live thereafter.)
+            GpuProcessReader.GetDiscreteGpuProcesses(); // prime pass
+            await Task.Delay(800);
             LoadGpuProcessList();
         }
         catch (Exception ex)
@@ -151,7 +161,7 @@ public class MainManagerForm : Form
         _gpuGrid.Columns.Add("GpuDedicated", "Dedicated VRAM (MB)");
         _gpuGrid.Columns["GpuPid"].Width = 70;
         _gpuGrid.Columns["GpuDedicated"].Width = 150;
-        _gpuGrid.SelectionChanged += (s, e) => ToggleActionButtons(false);
+        _gpuGrid.SelectionChanged += (s, e) => SetGpuTabButtonsEnabled(_gpuGrid.SelectedRows.Count > 0);
 
         _gpuTotalLabel = new Label
         {
@@ -168,6 +178,32 @@ public class MainManagerForm : Form
 
         var gpuTab = new TabPage("Discrete GPU");
         gpuTab.Controls.Add(_gpuGrid);
+
+        // Action bar: per-process controls that operate on the row selected above.
+        var gpuActionBar = new Panel { Dock = DockStyle.Bottom, Height = 44, BackColor = Color.FromArgb(230, 235, 240) };
+        _assignIgpuGpuBtn = new Button
+        {
+            Dock = DockStyle.Left,
+            Width = 190,
+            Text = "Assign to iGPU (Power Save)",
+            Enabled = false,
+            TextAlign = ContentAlignment.MiddleCenter
+        };
+        _assignIgpuGpuBtn.Click += AssignGpuTabToIgpu;
+        _killBtn = new Button
+        {
+            Dock = DockStyle.Right,
+            Width = 220,
+            Text = "Kill Selected Process (VRAM)",
+            Enabled = false,
+            Font = new Font(_gpuGrid.Font, FontStyle.Bold),
+            ForeColor = Color.DarkRed,
+            TextAlign = ContentAlignment.MiddleCenter
+        };
+        _killBtn.Click += KillSelectedGpuProcess;
+        gpuActionBar.Controls.Add(_killBtn);
+        gpuActionBar.Controls.Add(_assignIgpuGpuBtn);
+        gpuTab.Controls.Add(gpuActionBar);
         gpuTab.Controls.Add(_gpuTotalLabel);
 
         _tabControl = new TabControl { Dock = DockStyle.Fill };
@@ -183,26 +219,81 @@ public class MainManagerForm : Form
         if (this.IsDisposed) return;
         this.Invoke(() =>
         {
+            // Remember the selected PID so the row (and the Kill button) survive the refresh.
+            int selectedPid = 0;
+            if (_gpuGrid.SelectedRows.Count > 0
+                && int.TryParse(_gpuGrid.SelectedRows[0].Cells["GpuPid"].Value?.ToString(), out var p))
+            {
+                selectedPid = p;
+            }
+
             _gpuGrid.SuspendLayout();
             try
             {
+                _gpuGrid.ClearSelection();
                 _gpuGrid.Rows.Clear();
                 double totalMb = 0;
+                int restoreIndex = -1;
                 foreach (var row in rows)
                 {
                     totalMb += row.DedicatedMb;
-                    _gpuGrid.Rows.Add(row.ProcessName, row.Pid, row.DedicatedMb.ToString("N1"));
+                    int idx = _gpuGrid.Rows.Add(row.ProcessName, row.Pid, row.DedicatedMb.ToString("N1"));
+                    if (row.Pid == selectedPid) restoreIndex = idx;
                 }
 
                 _gpuTotalLabel.Text = rows.Count == 0
                     ? "No processes currently using dedicated VRAM on the discrete GPU."
                     : $"{rows.Count} process(es) on the discrete GPU — {totalMb:N0} MB dedicated total";
+
+                // Put the selection back on the same process it was on before the refresh.
+                if (restoreIndex >= 0)
+                {
+                    _gpuGrid.Rows[restoreIndex].Selected = true;
+                    _gpuGrid.CurrentCell = _gpuGrid.Rows[restoreIndex].Cells[0];
+                }
             }
             finally
             {
                 _gpuGrid.ResumeLayout();
             }
         });
+    }
+
+    private void KillSelectedGpuProcess(object? sender, EventArgs e)
+    {
+        if (_gpuGrid.SelectedRows.Count == 0)
+        {
+            return;
+        }
+
+        var pidText = _gpuGrid.SelectedRows[0].Cells["GpuPid"].Value?.ToString();
+        if (!int.TryParse(pidText, out var pid) || pid <= 1)
+        {
+            MessageBox.Show("Cannot kill this entry (unknown or protected system process).", "Kill Failed",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        var name = _gpuGrid.SelectedRows[0].Cells["GpuProcName"].Value?.ToString() ?? "process";
+
+        if (MessageBox.Show($"Kill {name} (PID {pid})?\nIt will stop using VRAM on the discrete GPU.",
+            "Confirm Process Termination", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            Process.GetProcessById(pid).Kill();
+            MessageBox.Show($"Killed {name} (PID {pid}).", "Process Killed",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            LoadGpuProcessList();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Could not kill PID {pid}: {ex.Message}", "Process Error",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     private void UpdateVramDisplay()
@@ -229,6 +320,9 @@ public class MainManagerForm : Form
         {
             InspectKeeperProcessStatus();
             UpdateVramDisplay();
+            // Keep the VRAM process view live. Runs on a background thread — the per-process
+            // PDH reads and Process.GetProcesses() are too heavy to block the UI thread.
+            _ = Task.Run(() => LoadGpuProcessList());
         };
         _statusTimer.Start();
     }
@@ -375,6 +469,17 @@ public class MainManagerForm : Form
         string ruleKey = SelectedRuleKey();
         if (string.IsNullOrEmpty(ruleKey) || ruleKey.StartsWith("Unknown")) return;
 
+        ApplyGpuRuleByKey(ruleKey, ruleValue);
+        LoadProcessList();
+    }
+
+    /// <summary>
+    /// The shared registry-write + feedback routine both tabs use to pin a process to a GPU.
+    /// Takes an already-resolved rule key (AUMID for packaged apps, exe path otherwise) and
+    /// the preference value, so the Discrete GPU tab can drive it from a PID without a grid Tag.
+    /// </summary>
+    private void ApplyGpuRuleByKey(string ruleKey, string ruleValue)
+    {
         using (RegistryKey key = Registry.CurrentUser.CreateSubKey(RegPath))
         {
             key.SetValue(ruleKey, ruleValue, RegistryValueKind.String);
@@ -385,7 +490,45 @@ public class MainManagerForm : Form
             ? "\n\nKeyed by AUMID, so it survives app updates."
             : "";
         MessageBox.Show($"Successfully locked preference for:\n{what}\nChanges take effect next time the application launches.{note}", "Registry Injected", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    /// <summary>
+    /// Assigns the process selected in the Discrete GPU tab (identified by PID only) to the
+    /// iGPU, reusing the exact registry routine the Process List tab uses.
+    /// </summary>
+    private void AssignGpuTabToIgpu(object? sender, EventArgs e)
+    {
+        if (_gpuGrid.SelectedRows.Count == 0) return;
+        if (!int.TryParse(_gpuGrid.SelectedRows[0].Cells["GpuPid"].Value?.ToString(), out var pid) || pid <= 1) return;
+
+        string? ruleKey;
+        try
+        {
+            using var proc = Process.GetProcessById(pid);
+            string exePath = proc.MainModule?.FileName ?? "Unknown";
+            ruleKey = GpuPreferenceKey.ForProcess(proc, exePath);
+        }
+        catch
+        {
+            ruleKey = null;
+        }
+
+        if (string.IsNullOrEmpty(ruleKey) || ruleKey.StartsWith("Unknown"))
+        {
+            MessageBox.Show("Could not resolve the process's executable (access denied).", "Assignment Failed",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        ApplyGpuRuleByKey(ruleKey, "GpuPreference=1;");
         LoadProcessList();
+    }
+
+    /// <summary>Enables/disables the two per-process buttons in the Discrete GPU tab together.</summary>
+    private void SetGpuTabButtonsEnabled(bool enabled)
+    {
+        _killBtn.Enabled = enabled;
+        _assignIgpuGpuBtn.Enabled = enabled;
     }
 
     private void RemoveGpuRule()

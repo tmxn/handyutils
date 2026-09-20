@@ -14,13 +14,20 @@ public readonly struct GpuProcessUsage
 }
 
 /// <summary>
-/// Lists the processes that currently hold dedicated GPU memory on the discrete GPU.
+/// Lists the processes that currently hold dedicated GPU memory.
 ///
 /// Data source: the "GPU Process Memory" performance counter category, one
 /// "Dedicated Usage" sample per (pid, adapter) pair, with instance names like
-/// "pid_1234_luid_0x00000000_0x834815e3_phys_0". We keep only the instances whose
-/// LUID matches the discrete GPU identified by <see cref="GpuVramReader.GetDiscreteGpuLuid"/>
-/// (largest-VRAM physical adapter, same heuristic as the VRAM label) — no hardcoded LUID.
+/// "pid_1234_luid_0x00000000_0x834815e3_phys_0". We keep only instances whose adapter
+/// LUID is one of the physical (dedicated-VRAM) adapters reported by
+/// <see cref="GpuVramReader.GetPhysicalGpuLuids"/> — no hardcoded LUID.
+///
+/// We deliberately do NOT pin the list to a single "discrete" GPU: which physical
+/// adapter is the discrete one cannot be told from the perf counters alone in an
+/// idle-proof way (an idle discrete GPU's committed/usage counters read low and a busy
+/// iGPU can outrank it, which made the list come back empty). Only the discrete GPU has
+/// dedicated VRAM, so any process reporting dedicated usage is, by definition, on it —
+/// iGPU/virtual adapters report zero dedicated usage and drop out naturally.
 /// </summary>
 public static class GpuProcessReader
 {
@@ -33,26 +40,45 @@ public static class GpuProcessReader
         @"^pid_(\d+)_luid_(0x[0-9a-f]+)_(0x[0-9a-f]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>
-    /// Returns per-process dedicated VRAM on the discrete GPU, largest first.
-    /// Processes that have exited since the counter sample are reported as "pid N".
+    /// True if the instance name carries one of the given adapters' LUIDs, regardless of
+    /// whether the two halves (low, high) are emitted in low|high or high|low order.
+    /// Different Windows perf-counter categories format the same LUID in different
+    /// orders, so we match both.
+    /// </summary>
+    private static bool IsPhysicalAdapter(string instance, List<(string Low, string High)> luids)
+    {
+        foreach (var (low, high) in luids)
+        {
+            if (instance.Contains($"luid_{low}_{high}", StringComparison.OrdinalIgnoreCase)
+                || instance.Contains($"luid_{high}_{low}", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Returns per-process dedicated VRAM on the physical (dedicated-VRAM) GPU, largest
+    /// first. Processes that have exited since the counter sample are reported as "pid N".
     /// </summary>
     public static List<GpuProcessUsage> GetDiscreteGpuProcesses()
     {
-        var luid = GpuVramReader.GetDiscreteGpuLuid();
-        if (luid == null)
+        var physicalLuids = GpuVramReader.GetPhysicalGpuLuids()
+            .Select(x => (x.Low, x.High))
+            .ToList();
+        if (physicalLuids.Count == 0)
         {
             return [];
         }
 
-        string luidTag = $"luid_{luid.Value.Low}_{luid.Value.High}";
-
-        // Snapshot the instance names that belong to the discrete GPU right now.
+        // Snapshot the instance names that belong to a physical adapter right now.
         List<string> liveInstances;
         try
         {
             var category = new PerformanceCounterCategory("GPU Process Memory");
             liveInstances = category.GetInstanceNames()
-                .Where(n => n.Contains(luidTag, StringComparison.OrdinalIgnoreCase))
+                .Where(n => IsPhysicalAdapter(n, physicalLuids))
                 .ToList();
         }
         catch

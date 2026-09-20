@@ -104,11 +104,13 @@ public static class GpuVramReader
             .Where(n => n.EndsWith("phys_0"))
             .ToArray();
 
-        // 3. Sort by current committed memory descending and keep the top N.
-        //    (Virtual display adapters commit only KBs, so they fall to the bottom.)
+        // 3. Sort by total dedicated VRAM capacity descending and keep the top N.
+        //    (Virtual display adapters have essentially no capacity, so they fall to the
+        //    bottom — and this is immune to the "idle dGPU looks like the smallest
+        //    committed adapter" problem the committed-only sort suffered from.)
         var selected = physInstances
-            .Select(inst => (Instance: inst, Committed: ReadCommittedBytes(inst)))
-            .OrderByDescending(x => x.Committed)
+            .Select(inst => (Instance: inst, Capacity: ReadTotalCapacityBytes(inst)))
+            .OrderByDescending(x => x.Capacity)
             .Take(physicalGpuCount)
             .ToList();
 
@@ -128,8 +130,9 @@ public static class GpuVramReader
 
     /// <summary>
     /// Returns the LUID pair (low, high) of the discrete GPU, identified as the physical
-    /// adapter with the largest committed VRAM — the same heuristic the VRAM label uses
-    /// to order the adapters. Null if no physical GPU was detected.
+    /// adapter with the largest total VRAM capacity — the same criterion the VRAM label
+    /// uses to order the adapters. Ranking by capacity (not "Total Committed") avoids
+    /// picking a busy iGPU over an idle discrete GPU. Null if no physical GPU detected.
     /// </summary>
     public static (string Low, string High)? GetDiscreteGpuLuid()
     {
@@ -144,7 +147,7 @@ public static class GpuVramReader
         }
 
         string bestInstance = _selectedInstances
-            .OrderByDescending(inst => ReadCommittedBytes(inst))
+            .OrderByDescending(inst => ReadTotalCapacityBytes(inst))
             .First();
 
         var m = InstanceLuidRegex.Match(bestInstance);
@@ -152,17 +155,65 @@ public static class GpuVramReader
     }
 
     /// <summary>
-    /// Reads "Total Committed" (bytes) for a single adapter instance, or returns 0 on failure.
+    /// Returns the LUID pair (low, high) for every physical (dedicated-VRAM) adapter
+    /// selected at init. Used so the process reader can list dedicated-VRAM consumers
+    /// across the real GPUs without having to guess which single one is the "discrete" GPU
+    /// at any given instant (an idle discrete GPU's counters read low, so a committed-based
+    /// pick mis-fires and the list comes back empty).
     /// </summary>
-    private static long ReadCommittedBytes(string instance)
+    public static IEnumerable<(string Low, string High)> GetPhysicalGpuLuids()
+    {
+        if (!_initialized)
+        {
+            Initialize();
+        }
+
+        foreach (var inst in _selectedInstances)
+        {
+            var m = InstanceLuidRegex.Match(inst);
+            if (m.Success)
+            {
+                yield return (m.Groups[1].Value, m.Groups[2].Value);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Estimates an adapter's total dedicated VRAM capacity (bytes): the currently used
+    /// "Dedicated Usage" plus the currently free "Dedicated Memory". Both together are
+    /// essentially usage-independent, unlike "Total Committed" which collapses toward
+    /// zero when the adapter is idle (and would let a busy iGPU outrank an idle discrete
+    /// GPU when ranking by committed memory).
+    /// </summary>
+    private static long ReadTotalCapacityBytes(string instance)
     {
         try
         {
+            var used = new PerformanceCounter("GPU Adapter Memory", "Dedicated Usage", instance, true);
+            used.NextValue(); // prime
+            var free = new PerformanceCounter("GPU Adapter Memory", "Dedicated Memory", instance, true);
+            free.NextValue(); // prime
+            long capacity = (long)used.NextValue() + (long)free.NextValue();
+            used.Dispose();
+            free.Dispose();
+            if (capacity > 0)
+            {
+                return capacity;
+            }
+        }
+        catch
+        {
+            // fall through to the committed-based fallback below
+        }
+
+        // Some driver builds omit the free counter; fall back to committed as a proxy.
+        try
+        {
             var committed = new PerformanceCounter("GPU Adapter Memory", "Total Committed", instance, true);
-            committed.NextValue();  // prime
+            committed.NextValue(); // prime
             long v = (long)committed.NextValue();
             committed.Dispose();
-            return v < 0 ? 0 : v;
+            return v > 0 ? v : 0;
         }
         catch
         {
